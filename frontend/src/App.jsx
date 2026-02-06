@@ -1,11 +1,11 @@
 // src/App.jsx
 import { useState } from 'react'
-import './App.css' // Файл пустой, но пусть будет, пригодится для стилей
+import Board from './components/Board/Board'
+import './App.css'
 
 function App() {
   const [walletAddress, setWalletAddress] = useState("");
 
-  // Функция подключения кошелька (заглушка)
   const connectWallet = async () => {
     if (window.ethereum) {
       try {
@@ -15,29 +15,30 @@ function App() {
         console.error("Connection error:", error);
       }
     } else {
-      alert("Donwload Metamask!");
+      alert("Please install Metamask to play FlarePoly!");
     }
   };
 
   return (
-    <div style={{ padding: "20px", textAlign: "center" }}>
-      <h1>FlarePoly</h1>
+    <div className="app-container">
       
-      {/* Кнопка входа */}
-      <div style={{ marginBottom: "20px" }}>
-        {walletAddress ? (
-          <p>Player: <strong>{walletAddress}</strong></p>
-        ) : (
-          <button onClick={connectWallet} style={{ padding: "10px 20px", fontSize: "16px" }}>
-            Connect Wallet
+      {/* WALLET WIDGET (Top Right) */}
+      <div className="wallet-overlay">
+        {!walletAddress ? (
+          <button className="connect-btn" onClick={connectWallet}>
+            CONNECT WALLET
           </button>
+        ) : (
+          <div className="wallet-connected">
+            <span className="status-dot">🟢</span> 
+            {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+          </div>
         )}
       </div>
 
-      {/* Тут будет игровое поле */}
-      <div style={{ border: "2px dashed gray", height: "400px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <p>Here will be the gameboard (Board)</p>
-      </div>
+      {/* GAME BOARD */}
+      <Board />
+      
     </div>
   )
 }

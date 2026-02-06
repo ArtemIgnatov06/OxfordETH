@@ -1,0 +1,86 @@
+/* src/App.css */
+
+/* ВАЖНО: Сбрасываем все отступы и растягиваем на весь экран */
+:root, html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #020617; /* Цвет фона как у доски */
+  overflow: hidden; /* Убираем скролл */
+}
+
+/* Растягиваем корневой контейнер Vite */
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  max-width: none; /* Убираем ограничение ширины по умолчанию */
+}
+
+/* Наш главный контейнер приложения */
+.app-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  /* Магия центрирования */
+  display: flex;
+  justify-content: center; /* По горизонтали */
+  align-items: center;     /* По вертикали */
+}
+
+/* --- СТИЛИ КОШЕЛЬКА (Остаются прежними) --- */
+.wallet-overlay {
+  position: absolute;
+  top: 30px;   /* Чуть отодвинул от верха */
+  right: 30px; /* Чуть отодвинул от края */
+  z-index: 100; /* Поверх всего */
+}
+
+.connect-btn {
+  background: linear-gradient(90deg, #ff0055, #ff9900); /* Flare Colors */
+  border: none;
+  padding: 12px 24px;
+  color: white;
+  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-weight: 800;
+  letter-spacing: 1px;
+  cursor: pointer;
+  border-radius: 4px;
+  box-shadow: 0 0 20px rgba(255, 0, 85, 0.4);
+  transition: all 0.3s ease;
+  text-transform: uppercase;
+}
+
+.connect-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 30px rgba(255, 0, 85, 0.8);
+}
+
+.wallet-connected {
+  background: rgba(15, 23, 42, 0.9);
+  padding: 10px 20px;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  color: #e2e8f0;
+  font-family: monospace;
+  font-size: 14px;
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
+.status-dot {
+  font-size: 10px;
+  color: #10b981; /* Зеленый цвет */
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+  70% { opacity: 1; box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
+  100% { opacity: 1; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
