@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import './Board.css';
 import { TILES, FAMILY_COLORS } from './BoardData';
+import ChanceModal from "../Chance/ChanceModal";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'; // Адрес вашего бекенда
 
@@ -13,7 +14,7 @@ const apiCall = async (endpoint, method = 'GET', body = null) => {
       headers: { 'Content-Type': 'application/json' },
     };
     if (body) options.body = JSON.stringify(body);
-    
+
     const res = await fetch(`${API_URL}${endpoint}`, options);
     if (!res.ok) {
       const err = await res.json();
@@ -22,27 +23,23 @@ const apiCall = async (endpoint, method = 'GET', body = null) => {
     return await res.json();
   } catch (e) {
     console.error("API Action Failed:", e);
-    // Можно добавить уведомление пользователю здесь
     return null;
   }
 };
-//chat
-
 
 const PLAYER_COLORS = ['#22c55e', '#3b82f6', '#a855f7', '#f97316'];
 
 const Board = () => {
   // === LOCAL UI STATE ===
   const [chatMsg, setChatMsg] = useState('');
-  const [isRolling, setIsRolling] = useState(false); // Блокировка UI во время анимации
+  const [isRolling, setIsRolling] = useState(false);
   const chatListRef = useRef(null);
   const shouldStickToBottomRef = useRef(true);
 
   // === SERVER STATE ===
-  // Загружаем начальное состояние null, чтобы показать "Loading..."
   const [gameState, setGameState] = useState(null);
-  
-  // Локальные позиции для анимации (чтобы фишки двигались плавно, а не телепортировались)
+
+  // Локальные позиции для анимации (чтобы фишки двигались плавно)
   const [visualPlayerPos, setVisualPlayerPos] = useState([0, 0, 0, 0]);
 
   // Модалка трейдов
@@ -57,37 +54,35 @@ const Board = () => {
   const base = import.meta.env.BASE_URL;
   const getTokenIconSrc = (tile) => `${base}images/${tile.name}.png`;
 
+  // ===== CHANCE CARD UI =====
+  const [chanceCard, setChanceCard] = useState(null); // { text, delta, key }
+  const lastMsgCountRef = useRef(0);
+  const lastShownNewsRef = useRef(""); // защита от дублей при polling
+  const closeChance = () => setChanceCard(null);
+
   const handleSendChat = async () => {
-    if (!chatMsg.trim()) return; 
-    
+    if (!chatMsg.trim()) return;
+
     const textToSend = chatMsg;
-    setChatMsg(''); 
-    
+    setChatMsg('');
+
     const newState = await apiCall('/chat', 'POST', { text: textToSend });
-    
+
     if (newState) {
       setGameState(newState);
     }
   };
 
   // === DATA FETCHING ===
-  
-  // Функция обновления стейта
   const fetchState = async () => {
-    // Если идет анимация броска, не обновляем стейт, чтобы не сбить визуализацию
-    if (isRolling) return; 
-    
+    if (isRolling) return;
+
     try {
       const res = await fetch(`${API_URL}/state`);
       const data = await res.json();
-      
-      setGameState(prev => {
-        // Простая оптимизация: если это не первый рендер и данные не изменились критично, можно не обновлять
-        // Но для простоты обновляем всегда, React сделает diff
-        return data;
-      });
 
-      // Синхронизируем визуальные позиции, если мы не в процессе анимации
+      setGameState(data);
+
       if (!isRolling) {
         setVisualPlayerPos(data.playerPos);
       }
@@ -101,18 +96,51 @@ const Board = () => {
     fetchState();
     const interval = setInterval(fetchState, 1000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRolling]);
 
   // === DERIVED DATA ===
-  // Если данных еще нет, используем заглушки
   const playersCount = gameState ? gameState.playerPos.length : 4;
   const activePlayer = gameState ? gameState.activePlayer : 0;
-  const balances = gameState ? gameState.balances : [0,0,0,0];
+  const balances = gameState ? gameState.balances : [0, 0, 0, 0];
   const ownership = gameState ? gameState.ownership : {}; // {"1": 0, "5": 2}
   const messages = gameState ? gameState.messages : [];
   const buyPrompt = gameState ? gameState.buyPrompt : null;
   const tradeOffers = gameState ? gameState.tradeOffers : [];
   const dice = gameState ? gameState.dice : [1, 1];
+
+  // ===== CHANCE: ловим новые News сообщения и показываем карточку =====
+  // ===== CHANCE: ловим новые NEWS сообщения и показываем карточку =====
+useEffect(() => {
+  if (!gameState) return;
+
+  const prevCount = lastMsgCountRef.current;
+  const nextCount = messages.length;
+
+  // При первом подключении просто синхронизируем счётчик,
+  // чтобы не триггериться на "Welcome..."
+  if (prevCount === 0 && nextCount > 0) {
+    lastMsgCountRef.current = nextCount;
+    return;
+  }
+
+  if (nextCount > prevCount) {
+    const newSlice = messages.slice(prevCount);
+
+    // Берем последнее news-сообщение среди новых
+    const newsMsg = [...newSlice].reverse().find((m) => m.type === "news");
+
+    if (newsMsg) {
+      setChanceCard({
+        text: newsMsg.text,
+        delta: typeof newsMsg.delta === "number" ? newsMsg.delta : null,
+        key: Date.now(),
+      });
+    }
+  }
+
+  lastMsgCountRef.current = nextCount;
+}, [messages, gameState]);
 
   const incomingOffersForActive = useMemo(
     () => tradeOffers.filter((o) => o.to === activePlayer),
@@ -155,7 +183,6 @@ const Board = () => {
 
   const byTile = useMemo(() => {
     const map = {};
-    // Используем visualPlayerPos для отображения фишек
     for (let p = 0; p < playersCount; p++) {
       const tileId = visualPlayerPos[p];
       (map[tileId] ||= []).push(p);
@@ -180,7 +207,7 @@ const Board = () => {
   const animateMove = async (playerIndex, startPos, steps) => {
     return new Promise((resolve) => {
       let currentStep = 0;
-      
+
       const tick = () => {
         currentStep++;
         setVisualPlayerPos((prev) => {
@@ -195,52 +222,36 @@ const Board = () => {
           resolve();
         }
       };
-      
+
       tick();
     });
   };
 
   // === ACTIONS ===
-
   const handleRoll = async () => {
-    if (isRolling || buyPrompt || tradeOpen || incomingOffersForActive.length > 0) return;
-    
+    if (isRolling || buyPrompt || tradeOpen || incomingOffersForActive.length > 0 || !!chanceCard) return;
+
     setIsRolling(true);
-    
-    // 1. Делаем запрос на сервер
+
     const newState = await apiCall('/roll', 'POST');
-    
+
     if (newState) {
-      // 2. Вычисляем сколько шагов прошел игрок
-      const pIdx = newState.activePlayer; // Сервер мог уже переключить игрока, если был дубль или событие?
-      // В твоем бекенде activePlayer переключается В КОНЦЕ хода. 
-      // Но /roll возвращает снэпшот ПОСЛЕ хода. Значит activePlayer уже может быть следующим.
-      // Нам нужно знать, кто ходил. 
-      // Хак: мы знаем activePlayer из текущего стейта (до обновления).
-      
-      const moverIdx = activePlayer; 
+      const moverIdx = activePlayer;
       const oldPos = visualPlayerPos[moverIdx];
       const newPos = newState.playerPos[moverIdx];
-      
-      // Считаем шаги с учетом круга
+
       let steps = newPos - oldPos;
       if (steps < 0) steps += TILES.length;
-      // Если steps === 0 (например попал в тюрьму или пропуск), анимацию можно пропустить, 
-      // но если кости выпали (dice > 0), значит движение было.
-      const diceSum = newState.dice[0] + newState.dice[1];
-      
-      // Анимация визуальная (используем сумму кубиков для красоты, даже если попал на варп)
-      // Для точности берем steps, если это обычный ход.
+
       const stepsToAnimate = steps === 0 ? 0 : steps;
 
       if (stepsToAnimate > 0) {
         await animateMove(moverIdx, oldPos, stepsToAnimate);
       }
-      
-      // 3. Обновляем глобальный стейт
+
       setGameState(newState);
     }
-    
+
     setIsRolling(false);
   };
 
@@ -259,7 +270,10 @@ const Board = () => {
     const newState = await apiCall('/reset', 'POST');
     if (newState) {
       setGameState(newState);
-      setVisualPlayerPos([0,0,0,0]);
+      setVisualPlayerPos([0, 0, 0, 0]);
+      setChanceCard(null);
+      lastMsgCountRef.current = 0;
+      lastShownNewsRef.current = "";
     }
   };
 
@@ -320,8 +334,7 @@ const Board = () => {
     const tileId = tradeForm.tileId != null ? Number(tradeForm.tileId) : null;
     const target = Number(tradeForm.target);
 
-    // Валидация базовая, остальное проверит бек
-    if (tileId == null) return; 
+    if (tileId == null) return;
 
     const body = {
       type: tradeForm.mode,
@@ -379,7 +392,6 @@ const Board = () => {
               </button>
             </div>
 
-
             <div className="game-controls">
               <div className="dice-section">
                 <div className="dice-display">🎲 {dice[0]} : {dice[1]}</div>
@@ -387,19 +399,21 @@ const Board = () => {
                 <button
                   className="roll-btn"
                   onClick={handleRoll}
-                  disabled={isRolling || !!buyPrompt || tradeOpen || incomingOffersForActive.length > 0}
+                  disabled={isRolling || !!buyPrompt || tradeOpen || incomingOffersForActive.length > 0 || !!chanceCard}
                 >
-                  {isRolling 
+                  {isRolling
                     ? 'MOVING...'
                     : buyPrompt || tradeOpen
                       ? 'WAIT...'
                       : incomingOffersForActive.length > 0
                         ? 'OFFERS...'
-                        : `P${activePlayer + 1} ROLL`}
+                        : !!chanceCard
+                          ? 'CHANCE...'
+                          : `P${activePlayer + 1} ROLL`}
                 </button>
               </div>
 
-<div className="chat-box">
+              <div className="chat-box">
                 <div
                   className="chat-messages"
                   ref={chatListRef}
@@ -412,12 +426,11 @@ const Board = () => {
                 >
                   {messages.map((m, i) => (
                     <div key={i} className="chat-msg-row">
-                      <span 
+                      <span
                         className="chat-user"
-                        style={{ 
-                          // Красим никнейм в цвет игрока, если это P1, P2...
-                          color: m.user.startsWith('P') && !isNaN(parseInt(m.user.slice(1))) 
-                            ? PLAYER_COLORS[parseInt(m.user.slice(1)) - 1] 
+                        style={{
+                          color: m.user.startsWith('P') && !isNaN(parseInt(m.user.slice(1)))
+                            ? PLAYER_COLORS[parseInt(m.user.slice(1)) - 1]
                             : '#888'
                         }}
                       >
@@ -429,16 +442,14 @@ const Board = () => {
                 </div>
 
                 <div className="chat-input-wrapper">
-                   <input
+                  <input
                     className="chat-input"
-                    // Пишем от имени того, чей сейчас ход
                     placeholder={`Say as Player ${activePlayer + 1}...`}
                     value={chatMsg}
                     onChange={(e) => setChatMsg(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleSendChat();
                     }}
-                    // Убираем disabled
                   />
                   <button className="chat-send-btn" onClick={handleSendChat}>➤</button>
                 </div>
@@ -448,14 +459,13 @@ const Board = () => {
 
           {/* --- TILES --- */}
           {TILES.map((tile) => {
-            // Используем вычисленный byTile для отображения фишек
             const playersHere = byTile[tile.id] || [];
             const gradient = buildConicGradient(playersHere);
             const activeHere = playersHere.includes(activePlayer);
             const activeColor = activeHere ? PLAYER_COLORS[activePlayer] : 'transparent';
 
-            const ownerIdx = ownership[tile.id]; // Бекенд возвращает ownership[tileId]
-            
+            const ownerIdx = ownership[tile.id];
+
             return (
               <div
                 key={tile.id}
@@ -479,7 +489,7 @@ const Board = () => {
 
                 <div className="tile-content">
                   {tile.type === 'corner' ? (
-                     tile.subtype === 'gotojail' ? (
+                    tile.subtype === 'gotojail' ? (
                       <div className="corner-full"><img className="corner-full-img" src={`${base}images/SYSTEMBUG.png`} alt="BUG" /></div>
                     ) : tile.subtype === 'jail' ? (
                       <div className="corner-full"><img className="corner-full-img" src={`${base}images/ACCOUNTBLOCKED.png`} alt="BLOCKED" /></div>
@@ -580,9 +590,7 @@ const Board = () => {
       {buyPrompt && (() => {
         const tile = TILES[buyPrompt.tileId];
         const pIdx = buyPrompt.playerIndex;
-        // Показываем модалку только если ход текущего активного игрока совпадает с prompt
-        // (Хотя бекенд блокирует ход, так что всё ок)
-        
+
         return (
           <div className="buy-modal-backdrop" onClick={handleSkipBuy}>
             <div className="buy-modal" onClick={(e) => e.stopPropagation()}>
@@ -620,8 +628,7 @@ const Board = () => {
         const sellMode = tradeForm.mode === 'sell';
         const selectableTiles = sellMode ? myOwnedTiles : otherOwnedTiles;
         const tile = tradeForm.tileId != null ? TILES[tradeForm.tileId] : null;
-        
-        // Автоматически определяем владельца для режима BUY, если плитка выбрана
+
         const inferredOwner = tradeForm.tileId != null ? ownership[tradeForm.tileId] : null;
         const buyTarget = inferredOwner != null ? inferredOwner : tradeForm.target;
 
@@ -662,7 +669,7 @@ const Board = () => {
                   <select
                     className="trade-select"
                     value={sellMode ? tradeForm.target : buyTarget}
-                    disabled={!sellMode} // В режиме покупки target определяется автоматически по владельцу плитки
+                    disabled={!sellMode}
                     onChange={(e) => setTradeForm((f) => ({ ...f, target: Number(e.target.value) }))}
                   >
                     {Array.from({ length: playersCount }, (_, i) => i)
@@ -691,7 +698,7 @@ const Board = () => {
                   </div>
                   {tile && (
                     <div className="trade-summary-tile">
-                       <div className="trade-summary-icon">
+                      <div className="trade-summary-icon">
                         <img src={getTokenIconSrc(tile)} alt={tile.name} />
                       </div>
                       <div className="trade-summary-meta">
@@ -721,6 +728,14 @@ const Board = () => {
           </div>
         );
       })()}
+
+      {/* --- MODAL: CHANCE CARD --- */}
+      <ChanceModal
+        open={!!chanceCard}
+        text={chanceCard?.text || ""}
+        delta={chanceCard?.delta}
+        onClose={closeChance}
+      />
     </div>
   );
 };

@@ -5,7 +5,9 @@ import time
 import uuid
 import random
 from board import BOARD_LEN, TILES_BY_ID, BUYABLE_PROPERTY_IDS, CHANCE_IDS
-
+from chance import ChanceDeck
+from wallet import Wallet
+from player import Player
 
 OfferType = Literal["sell", "buy"]
 START_TILE_ID = 0
@@ -20,7 +22,8 @@ PRISON_TILE_ID = 6        # waits / skips next turn
 class Message:
     user: str
     text: str
-
+    type: str = "chat"          # "chat" | "system" | "news" ...
+    delta: Optional[int] = None # только для news/chance
 @dataclass
 class TradeOffer:
     id: str
@@ -51,7 +54,7 @@ class GameState:
     eliminated: List[bool] = field(default_factory=lambda: [False, False, False, False])
     game_over: bool = False
     winner: Optional[int] = None
-
+    chance_deck: ChanceDeck = field(default_factory=ChanceDeck)
 
     # tileId -> ownerIndex
     ownership: Dict[int, int] = field(default_factory=dict)
@@ -119,8 +122,9 @@ class GameState:
             self._advance_to_next_alive()
 
 
-    def add_message(self, user: str, text: str):
-        self.messages.append(Message(user, text))
+    def add_message(self, user: str, text: str, msg_type: str = "chat", delta: int | None = None):
+        self.messages.append(Message(user, text, msg_type, delta))
+
 
     def incoming_offers_for_active(self) -> List[TradeOffer]:
         return [o for o in self.trade_offers if o.to_player == self.active_player]
@@ -169,15 +173,16 @@ class GameState:
 
         return new_pos
 
-    def _chance_news(self):
-        news = random.choice([
-            "Breaking: memecoin season is back.",
-            "News: gas fee spike. Everyone panics (but nothing happens).",
-            "Alert: whale moved funds. Market shrugs.",
-            "Update: protocol upgrade scheduled. Chat explodes.",
-            "Rumor: new listing coming. Everyone buys top.",
-        ])
-        self.add_message("News", news)
+    def _chance_news(self, player_index: int):
+        # заворачиваем баланс в Wallet -> Player, применяем ChanceDeck -> возвращаем баланс обратно
+        w = Wallet(self.balances[player_index])
+        pl = Player(id=player_index, name=f"P{player_index+1}", pos=self.player_pos[player_index], wallet=w)
+
+        result = self.chance_deck.apply(pl)  # {"type":"news","delta":...,"text":...}
+        self.balances[player_index] = pl.wallet.balance
+
+        self.add_message("News", result["text"], msg_type="news", delta=result["delta"])
+
 
     # ----- actions -----
     def roll(self):
@@ -213,7 +218,7 @@ class GameState:
 
         # chance -> news
         if final_pos in CHANCE_IDS:
-            self._chance_news()
+            self._chance_news(p)
             self.next_player()
             return
 
@@ -362,8 +367,7 @@ class GameState:
             "buyPrompt": self.buy_prompt,
             "balances": self.balances,
             "tradeOffers": [o.to_front() for o in self.trade_offers],
-            "messages": [{"user": m.user, "text": m.text} for m in self.messages],
-
+            "messages": [{"user": m.user, "text": m.text, "type": m.type, "delta": m.delta} for m in self.messages],
             "eliminated": self.eliminated,
             "gameOver": self.game_over,
             "winner": self.winner,
