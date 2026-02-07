@@ -69,7 +69,7 @@ const Board = () => {
       setGameState(newState);
     }
   };
-  
+
   // === DATA FETCHING ===
   
   // Функция обновления стейта
@@ -368,11 +368,17 @@ const Board = () => {
           {/* --- CENTER --- */}
           <div className="board-center">
             <div className="center-logo">
-              <h1 className="flare-title">FLAREPOLY</h1>
-              <p className="flare-subtitle">REAL-TIME CRYPTO MONOPOLY</p>
-              {/* Reset кнопка для дебага */}
-              <button onClick={handleReset} style={{opacity: 0.3, fontSize: '10px'}}>RESET GAME</button>
+              <img
+                src={`${base}FLAREPOLY.svg`}
+                alt="FlarePoly"
+                className="flare-logo"
+                draggable="false"
+              />
+              <button onClick={handleReset} style={{ opacity: 0.3, fontSize: '10px' }}>
+                RESET GAME
+              </button>
             </div>
+
 
             <div className="game-controls">
               <div className="dice-section">

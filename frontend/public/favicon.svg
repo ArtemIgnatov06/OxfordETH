@@ -1,0 +1,82 @@
+<svg width="320" height="320" viewBox="0 0 320 320" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FlarePoly icon">
+  <defs>
+    <linearGradient id="gStroke" x1="70" y1="40" x2="270" y2="280" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF2D7A"/>
+      <stop offset="0.45" stop-color="#FF4D2D"/>
+      <stop offset="1" stop-color="#FFC12D"/>
+    </linearGradient>
+
+    <linearGradient id="gInner" x1="98" y1="70" x2="250" y2="250" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF2D7A" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#FFC12D" stop-opacity="0.85"/>
+    </linearGradient>
+
+    <linearGradient id="gFlame" x1="148" y1="96" x2="182" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF2D7A"/>
+      <stop offset="0.55" stop-color="#FF4D2D"/>
+      <stop offset="1" stop-color="#FFC12D"/>
+    </linearGradient>
+
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="16" stdDeviation="16" flood-opacity="0.32"/>
+    </filter>
+
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feColorMatrix in="b" type="matrix"
+        values="1 0 0 0 0
+                0 1 0 0 0
+                0 0 1 0 0
+                0 0 0 0.35 0" result="g"/>
+      <feMerge>
+        <feMergeNode in="g"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- scale up icon inside viewBox (fills more space) -->
+  <g filter="url(#shadow)" transform="translate(160 160) scale(1.18) translate(-160 -160)">
+    <!-- Outer hex -->
+    <path
+      d="M160 40 L258 96 L258 224 L160 280 L62 224 L62 96 Z"
+      fill="#0B1020"
+      stroke="url(#gStroke)"
+      stroke-width="14"
+      stroke-linejoin="round"
+    />
+
+    <!-- Inner hex ring -->
+    <path
+      d="M160 72 L232 114 L232 206 L160 248 L88 206 L88 114 Z"
+      fill="none"
+      stroke="url(#gInner)"
+      stroke-width="8"
+      stroke-linejoin="round"
+      opacity="0.85"
+    />
+
+    <!-- Corner dots -->
+    <g opacity="0.9">
+      <circle cx="86" cy="114" r="7" fill="#8C98FF"/>
+      <circle cx="234" cy="114" r="7" fill="#8C98FF"/>
+      <circle cx="86" cy="206" r="7" fill="#8C98FF"/>
+      <circle cx="234" cy="206" r="7" fill="#8C98FF"/>
+    </g>
+
+    <!-- Flame + spark -->
+    <g filter="url(#glow)">
+      <path
+        d="M162 104
+           C148 126, 178 140, 154 162
+           C136 179, 144 216, 162 226
+           C181 216, 191 188, 176 168
+           C166 151, 198 138, 178 116
+           C172 109, 168 106, 162 104 Z"
+        fill="url(#gFlame)"
+      />
+      <circle cx="206" cy="124" r="10" fill="#FFC12D" opacity="0.95"/>
+      <circle cx="220" cy="112" r="5" fill="#FF2D7A" opacity="0.9"/>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,91 @@
+<svg width="520" height="140" viewBox="0 0 520 140" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FlarePoly logo">
+  <defs>
+    <linearGradient id="flareGrad" x1="60" y1="10" x2="120" y2="130" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF2D7A"/>
+      <stop offset="0.45" stop-color="#FF4D2D"/>
+      <stop offset="1" stop-color="#FFC12D"/>
+    </linearGradient>
+
+    <linearGradient id="wordGrad" x1="170" y1="35" x2="490" y2="105" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF2D7A"/>
+      <stop offset="0.5" stop-color="#FF7A2D"/>
+      <stop offset="1" stop-color="#FFC12D"/>
+    </linearGradient>
+
+    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="1 0 0 0 0
+                0 1 0 0 0
+                0 0 1 0 0
+                0 0 0 0.35 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- ICON -->
+  <g filter="url(#shadow)" transform="translate(18,14)">
+    <!-- outer hex -->
+    <path d="M55 2 L93 24 L93 68 L55 90 L17 68 L17 24 Z"
+      fill="#0B1020" stroke="url(#flareGrad)" stroke-width="3" opacity="0.98"/>
+    <!-- inner glow ring -->
+    <path d="M55 12 L84 29 L84 63 L55 80 L26 63 L26 29 Z"
+      fill="none" stroke="url(#flareGrad)" stroke-width="2" opacity="0.65"/>
+
+    <!-- stylized flame/flare -->
+    <g filter="url(#softGlow)">
+      <path d="M56.5 24
+               C49 34, 63 39, 51.5 49
+               C43 56, 46 70, 56.5 73
+               C67 70, 70 58, 64 51
+               C60 45, 70 40, 62.5 32
+               C60 28, 58 26, 56.5 24 Z"
+        fill="url(#flareGrad)"/>
+      <!-- small spark -->
+      <circle cx="71" cy="30" r="3.2" fill="#FFC12D" opacity="0.95"/>
+      <circle cx="74.5" cy="24.5" r="1.6" fill="#FF2D7A" opacity="0.9"/>
+    </g>
+
+    <!-- tiny board dots -->
+    <g opacity="0.7">
+      <circle cx="25" cy="24" r="2" fill="#9AA4FF"/>
+      <circle cx="85" cy="24" r="2" fill="#9AA4FF"/>
+      <circle cx="25" cy="68" r="2" fill="#9AA4FF"/>
+      <circle cx="85" cy="68" r="2" fill="#9AA4FF"/>
+    </g>
+  </g>
+
+  <!-- WORDMARK -->
+  <g transform="translate(140,0)">
+    <text x="0" y="86"
+      font-size="54"
+      font-weight="800"
+      letter-spacing="1.5"
+      font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial"
+      fill="url(#wordGrad)">
+      FlarePoly
+    </text>
+
+    <!-- tagline -->
+    <text x="2" y="116"
+      font-size="14"
+      font-weight="600"
+      letter-spacing="3"
+      font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial"
+      fill="#9AA4FF"
+      opacity="0.9">
+      REAL-TIME CRYPTO MONOPOLY
+    </text>
+
+    <!-- underline accent -->
+    <path d="M4 98 C110 118, 235 118, 360 98"
+      stroke="url(#flareGrad)" stroke-width="3" stroke-linecap="round" opacity="0.9"/>
+  </g>
+</svg>
