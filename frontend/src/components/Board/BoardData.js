@@ -16,7 +16,7 @@ export const TILES = [
   { id: 5, type: 'tax', name: 'Gas Fee', price: 100 },
 
   // --- LEFT COLUMN (Bottom to Top) ---
-  { id: 6, type: 'corner', subtype: 'jail', name: 'JAIL', price: null },
+  { id: 6, type: 'corner', subtype: 'jail', name: 'ACCOUNT BLOCKED', price: null },
 
   // SOL family (остальные 2)
   { id: 7, type: 'property', family: 'sol', name: 'SOL', price: 145, rent: 14 },
@@ -29,7 +29,7 @@ export const TILES = [
   { id: 11, type: 'property', family: 'bnb', name: 'CAKE', price: 2.5, rent: 20 },
 
   // --- TOP ROW (Left to Right) ---
-  { id: 12, type: 'corner', subtype: 'parking', name: 'HODL', price: null },
+  { id: 12, type: 'corner', subtype: 'parking', name: 'SYSTEM DOWN', price: null },
 
   // ✅ TWT фиксируем на 13
   { id: 13, type: 'property', family: 'bnb', name: 'TWT', price: 1.1, rent: 16 },
@@ -41,8 +41,7 @@ export const TILES = [
   { id: 17, type: 'property', family: 'eth', name: 'UNI', price: 7.5, rent: 18 },
 
   // --- RIGHT COLUMN (Top to Bottom) ---
-  // ❗ НЕ двигаем
-  { id: 18, type: 'corner', subtype: 'gotojail', name: 'GO TO JAIL', price: null },
+  { id: 18, type: 'corner', subtype: 'gotojail', name: 'SYSTEM BUG', price: null },
 
   // (Rug Pull был 17 -> стал 19, потому что 18 занято GO TO JAIL)
   { id: 19, type: 'tax', name: 'Gas Fee', price: 100 },

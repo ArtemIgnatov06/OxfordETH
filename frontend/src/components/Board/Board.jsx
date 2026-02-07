@@ -100,57 +100,45 @@ const Board = () => {
 
             <div className="tile-content">
              {tile.type === 'corner' ? (
-                tile.subtype === 'gotojail' ? (
+                    tile.subtype === 'gotojail' ? (
                     <div className="corner-full">
-                    <img
+                        <img
                         className="corner-full-img"
-                        src={`${base}images/GOTOJAIL.png`}
-                        alt="GO TO JAIL"
+                        src={`${base}images/SYSTEMBUG.png`}
+                        alt="SYSTEM BUG"
                         loading="lazy"
-                    />
-                    <div className="corner-overlay">
-                        <div className="corner-title-big"></div>
+                        />
                     </div>
-                    </div>
-                ) : tile.subtype === 'jail' ? (
+                    ) : tile.subtype === 'jail' ? (
                     <div className="corner-full">
-                    <img
+                        <img
                         className="corner-full-img"
-                        src={`${base}images/JAIL.png`}
-                        alt="JAIL"
+                        src={`${base}images/ACCOUNTBLOCKED.png`}
+                        alt="ACCOUNT BLOCKED"
                         loading="lazy"
-                    />
-                    <div className="corner-overlay">
-                        <div className="corner-title-big"></div>
+                        />
                     </div>
-                    </div>
-                ) : tile.subtype === 'go' ? (
+                    ) : tile.subtype === 'go' ? (
                     <div className="corner-full">
-                    <img
+                        <img
                         className="corner-full-img"
                         src={`${base}images/START.png`}
                         alt="START"
                         loading="lazy"
-                    />
-                    <div className="corner-overlay">
-                        <div className="corner-title-big"></div>
+                        />
                     </div>
-                    </div>
-                ) : tile.subtype === 'parking' ? (
+                    ) : tile.subtype === 'parking' ? (
                     <div className="corner-full">
-                    <img
+                        <img
                         className="corner-full-img"
-                        src={`${base}images/HODL.png`}
-                        alt="HODL"
+                        src={`${base}images/SYSTEMDOWN.png`}
+                        alt="SYSTEM DOWN"
                         loading="lazy"
-                    />
-                    <div className="corner-overlay">
-                        <div className="corner-title-big"></div>
+                        />
                     </div>
-                    </div>
-                ) : (
+                    ) : (
                     <div className="corner-title">{tile.name}</div>
-                )
+                    )
                 ) : tile.type === 'chance' ? (
                 <div className="corner-full">
                     <img
