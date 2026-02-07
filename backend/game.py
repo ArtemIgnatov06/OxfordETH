@@ -8,6 +8,13 @@ from board import BOARD_LEN, TILES_BY_ID, BUYABLE_PROPERTY_IDS, CHANCE_IDS
 
 
 OfferType = Literal["sell", "buy"]
+START_TILE_ID = 0
+START_BONUS_FC = 200
+PRISON_WAIT_TURNS = 1
+skip_turns: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
+PRISON_TILE_ID = 6        # waits / skips next turn
+
+
 
 @dataclass
 class Message:
@@ -140,8 +147,27 @@ class GameState:
         return self.dice
 
     def _move(self, player_index: int, steps: int) -> int:
-        self.player_pos[player_index] = (self.player_pos[player_index] + steps) % BOARD_LEN
-        return self.player_pos[player_index]
+        old_pos = self.player_pos[player_index]
+        new_pos = (old_pos + steps) % BOARD_LEN
+
+        # Passed START (wrap-around)
+        if old_pos + steps >= BOARD_LEN:
+            self.balances[player_index] += START_BONUS_FC
+            self.add_message("System", f"P{player_index + 1} received {START_BONUS_FC} FC for passing START")
+            self._check_bankruptcy_and_win()
+            if self.game_over:
+                return new_pos
+
+        self.player_pos[player_index] = new_pos
+
+        # Landed exactly on START (optional: if you want BOTH pass+land,
+        # remove this block. Most games pay once.)
+        if new_pos == START_TILE_ID and steps != 0:
+            self.balances[player_index] += START_BONUS_FC
+            self.add_message("System", f"P{player_index + 1} received {START_BONUS_FC} FC for landing on START")
+            self._check_bankruptcy_and_win()
+
+        return new_pos
 
     def _chance_news(self):
         news = random.choice([
@@ -156,7 +182,15 @@ class GameState:
     # ----- actions -----
     def roll(self):
         self._advance_to_next_alive()
-        self._guard_turn_not_blocked()
+
+        # If player must skip turns, consume one and pass turn
+        if self.skip_turns[self.active_player] > 0:
+            p = self.active_player
+            self.skip_turns[p] -= 1
+            self.add_message("System", f"P{p + 1} skips this turn (Prison)")
+            self.next_player()
+            return
+
         self._guard_turn_not_blocked()
 
         d1, d2 = self._roll_dice()
@@ -166,6 +200,15 @@ class GameState:
         self.add_message("Player", f"P{p+1} rolled {steps} ({d1} + {d2})")
 
         final_pos = self._move(p, steps)
+
+        # prison -> skip next turn
+        if final_pos == PRISON_TILE_ID:
+            self.skip_turns[p] += PRISON_WAIT_TURNS
+            self.add_message("System", f"P{p+1} goes to Prison and will skip the next turn")
+            self.next_player()
+            return
+
+
         tile = TILES_BY_ID[final_pos]
 
         # chance -> news
@@ -324,5 +367,6 @@ class GameState:
             "eliminated": self.eliminated,
             "gameOver": self.game_over,
             "winner": self.winner,
+            "skipTurns": self.skip_turns
         }
 
