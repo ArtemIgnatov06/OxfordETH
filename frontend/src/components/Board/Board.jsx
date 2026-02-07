@@ -3,112 +3,101 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import './Board.css';
 import { TILES, FAMILY_COLORS } from './BoardData';
 
-const PLAYERS_MAX = 4;
+const API_URL = 'http://localhost:8000'; // Адрес вашего бекенда
+
+// Вспомогательная функция для API запросов
+const apiCall = async (endpoint, method = 'GET', body = null) => {
+  try {
+    const options = {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+    };
+    if (body) options.body = JSON.stringify(body);
+    
+    const res = await fetch(`${API_URL}${endpoint}`, options);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'API Error');
+    }
+    return await res.json();
+  } catch (e) {
+    console.error("API Action Failed:", e);
+    // Можно добавить уведомление пользователю здесь
+    return null;
+  }
+};
+
 const PLAYER_COLORS = ['#22c55e', '#3b82f6', '#a855f7', '#f97316'];
 
-const isPropertyBuyable = (tile) => tile?.type === 'property' && tile?.price != null;
-
 const Board = () => {
-  const [dice, setDice] = useState([1, 1]);
+  // === LOCAL UI STATE ===
   const [chatMsg, setChatMsg] = useState('');
-  const [messages, setMessages] = useState([{ user: 'System', text: 'Welcome to FlarePoly Testnet!' }]);
-
+  const [isRolling, setIsRolling] = useState(false); // Блокировка UI во время анимации
   const chatListRef = useRef(null);
   const shouldStickToBottomRef = useRef(true);
 
-  const playersCount = PLAYERS_MAX;
+  // === SERVER STATE ===
+  // Загружаем начальное состояние null, чтобы показать "Loading..."
+  const [gameState, setGameState] = useState(null);
+  
+  // Локальные позиции для анимации (чтобы фишки двигались плавно, а не телепортировались)
+  const [visualPlayerPos, setVisualPlayerPos] = useState([0, 0, 0, 0]);
 
-  const [playerPos, setPlayerPos] = useState(() => Array.from({ length: playersCount }, () => 0));
-  const [activePlayer, setActivePlayer] = useState(0);
-
-  // tileId -> ownerPlayerIndex
-  const [ownership, setOwnership] = useState({});
-
-  // покупка на приземлении: { tileId, playerIndex }
-  const [buyPrompt, setBuyPrompt] = useState(null);
-
-  // FlareCoins по игрокам (state, двигаются только при сделках улиц)
-  const [balances, setBalances] = useState(() => [4200, 1337, 777, 9001].slice(0, playersCount));
-
-  // ===== STREET OFFERS =====
-  // offer = { id, type:'sell'|'buy', from, to, tileId, priceFC, createdAt }
-  const [tradeOffers, setTradeOffers] = useState([]);
-
-  // модалка создания оффера (SELL/BUY)
+  // Модалка трейдов
   const [tradeOpen, setTradeOpen] = useState(false);
   const [tradeForm, setTradeForm] = useState({
-    mode: 'sell',     // 'sell' | 'buy'
-    tileId: null,     // number
-    target: 1,        // player index
-    priceFC: 500,     // number
+    mode: 'sell',
+    tileId: null,
+    target: 1,
+    priceFC: 500,
   });
 
   const base = import.meta.env.BASE_URL;
   const getTokenIconSrc = (tile) => `${base}images/${tile.name}.png`;
 
-  const addMessage = (user, text) => setMessages((prev) => [...prev, { user, text }]);
+  // === DATA FETCHING ===
+  
+  // Функция обновления стейта
+  const fetchState = async () => {
+    // Если идет анимация броска, не обновляем стейт, чтобы не сбить визуализацию
+    if (isRolling) return; 
+    
+    try {
+      const res = await fetch(`${API_URL}/state`);
+      const data = await res.json();
+      
+      setGameState(prev => {
+        // Простая оптимизация: если это не первый рендер и данные не изменились критично, можно не обновлять
+        // Но для простоты обновляем всегда, React сделает diff
+        return data;
+      });
 
-  const getPositionStyle = (index) => {
-    let row, col;
-    if (index === 0) { row = 7; col = 7; }
-    else if (index > 0 && index < 6) { row = 7; col = 7 - index; }
-    else if (index === 6) { row = 7; col = 1; }
-    else if (index > 6 && index < 12) { row = 7 - (index - 6); col = 1; }
-    else if (index === 12) { row = 1; col = 1; }
-    else if (index > 12 && index < 18) { row = 1; col = 1 + (index - 12); }
-    else if (index === 18) { row = 1; col = 7; }
-    else { row = 1 + (index - 18); col = 7; }
-    return { gridRow: row, gridColumn: col };
-  };
-
-  const animateMove = async (playerIndex, steps) => {
-    return new Promise((resolve) => {
-      let remaining = steps;
-
-      const tick = () => {
-        setPlayerPos((prev) => {
-          const next = [...prev];
-          next[playerIndex] = (next[playerIndex] + 1) % TILES.length;
-          return next;
-        });
-
-        remaining -= 1;
-        if (remaining <= 0) return resolve();
-        setTimeout(tick, 120);
-      };
-
-      setTimeout(tick, 120);
-    });
-  };
-
-  const buildConicGradient = (playersOnTile) => {
-    const n = playersOnTile.length;
-    if (n === 0) return null;
-
-    const step = 360 / n;
-    const parts = playersOnTile.map((pIdx, i) => {
-      const from = i * step;
-      const to = (i + 1) * step;
-      const col = PLAYER_COLORS[pIdx];
-      return `${col} ${from}deg ${to}deg`;
-    });
-
-    return `conic-gradient(from -90deg, ${parts.join(', ')})`;
-  };
-
-  const byTile = useMemo(() => {
-    const map = {};
-    for (let p = 0; p < playersCount; p++) {
-      const tileId = playerPos[p];
-      (map[tileId] ||= []).push(p);
+      // Синхронизируем визуальные позиции, если мы не в процессе анимации
+      if (!isRolling) {
+        setVisualPlayerPos(data.playerPos);
+      }
+    } catch (e) {
+      console.error("Error fetching state:", e);
     }
-    return map;
-  }, [playerPos, playersCount]);
+  };
 
-  const walletMocks = useMemo(() => {
-    const baseAddrs = ['0xA1b2...C3d4', '0xBEEF...1337', '0x9f12...0AA1', '0xDEAD...B00B'];
-    return baseAddrs.slice(0, playersCount);
-  }, [playersCount]);
+  // Polling: Опрашиваем сервер каждую секунду
+  useEffect(() => {
+    fetchState();
+    const interval = setInterval(fetchState, 1000);
+    return () => clearInterval(interval);
+  }, [isRolling]);
+
+  // === DERIVED DATA ===
+  // Если данных еще нет, используем заглушки
+  const playersCount = gameState ? gameState.playerPos.length : 4;
+  const activePlayer = gameState ? gameState.activePlayer : 0;
+  const balances = gameState ? gameState.balances : [0,0,0,0];
+  const ownership = gameState ? gameState.ownership : {}; // {"1": 0, "5": 2}
+  const messages = gameState ? gameState.messages : [];
+  const buyPrompt = gameState ? gameState.buyPrompt : null;
+  const tradeOffers = gameState ? gameState.tradeOffers : [];
+  const dice = gameState ? gameState.dice : [1, 1];
 
   const incomingOffersForActive = useMemo(
     () => tradeOffers.filter((o) => o.to === activePlayer),
@@ -135,59 +124,134 @@ const Board = () => {
     return arr;
   }, [ownership, activePlayer]);
 
-  // ===== BUY ON LANDING =====
-  const handleRoll = async () => {
-    // блок если: модалка покупки/трейда или есть входящие офферы у текущего игрока
-    if (buyPrompt || tradeOpen || incomingOffersForActive.length > 0) return;
+  // === HELPERS ===
+  const getPositionStyle = (index) => {
+    let row, col;
+    if (index === 0) { row = 7; col = 7; }
+    else if (index > 0 && index < 6) { row = 7; col = 7 - index; }
+    else if (index === 6) { row = 7; col = 1; }
+    else if (index > 6 && index < 12) { row = 7 - (index - 6); col = 1; }
+    else if (index === 12) { row = 1; col = 1; }
+    else if (index > 12 && index < 18) { row = 1; col = 1 + (index - 12); }
+    else if (index === 18) { row = 1; col = 7; }
+    else { row = 1 + (index - 18); col = 7; }
+    return { gridRow: row, gridColumn: col };
+  };
 
-    const d1 = Math.floor(Math.random() * 6) + 1;
-    const d2 = Math.floor(Math.random() * 6) + 1;
-    setDice([d1, d2]);
-
-    const steps = d1 + d2;
-    addMessage('Player', `P${activePlayer + 1} rolled ${steps} (${d1} + ${d2})`);
-
-    const startPos = playerPos[activePlayer];
-    const finalPos = (startPos + steps) % TILES.length;
-
-    await animateMove(activePlayer, steps);
-
-    const tile = TILES[finalPos];
-
-    if (isPropertyBuyable(tile) && ownership[finalPos] == null) {
-      setBuyPrompt({ tileId: finalPos, playerIndex: activePlayer });
-      return;
+  const byTile = useMemo(() => {
+    const map = {};
+    // Используем visualPlayerPos для отображения фишек
+    for (let p = 0; p < playersCount; p++) {
+      const tileId = visualPlayerPos[p];
+      (map[tileId] ||= []).push(p);
     }
+    return map;
+  }, [visualPlayerPos, playersCount]);
 
-    setActivePlayer((p) => (p + 1) % playersCount);
+  const buildConicGradient = (playersOnTile) => {
+    const n = playersOnTile.length;
+    if (n === 0) return null;
+    const step = 360 / n;
+    const parts = playersOnTile.map((pIdx, i) => {
+      const from = i * step;
+      const to = (i + 1) * step;
+      const col = PLAYER_COLORS[pIdx];
+      return `${col} ${from}deg ${to}deg`;
+    });
+    return `conic-gradient(from -90deg, ${parts.join(', ')})`;
   };
 
-  const handleBuy = () => {
+  // === ANIMATION LOGIC ===
+  const animateMove = async (playerIndex, startPos, steps) => {
+    return new Promise((resolve) => {
+      let currentStep = 0;
+      
+      const tick = () => {
+        currentStep++;
+        setVisualPlayerPos((prev) => {
+          const next = [...prev];
+          next[playerIndex] = (startPos + currentStep) % TILES.length;
+          return next;
+        });
+
+        if (currentStep < steps) {
+          setTimeout(tick, 120);
+        } else {
+          resolve();
+        }
+      };
+      
+      tick();
+    });
+  };
+
+  // === ACTIONS ===
+
+  const handleRoll = async () => {
+    if (isRolling || buyPrompt || tradeOpen || incomingOffersForActive.length > 0) return;
+    
+    setIsRolling(true);
+    
+    // 1. Делаем запрос на сервер
+    const newState = await apiCall('/roll', 'POST');
+    
+    if (newState) {
+      // 2. Вычисляем сколько шагов прошел игрок
+      const pIdx = newState.activePlayer; // Сервер мог уже переключить игрока, если был дубль или событие?
+      // В твоем бекенде activePlayer переключается В КОНЦЕ хода. 
+      // Но /roll возвращает снэпшот ПОСЛЕ хода. Значит activePlayer уже может быть следующим.
+      // Нам нужно знать, кто ходил. 
+      // Хак: мы знаем activePlayer из текущего стейта (до обновления).
+      
+      const moverIdx = activePlayer; 
+      const oldPos = visualPlayerPos[moverIdx];
+      const newPos = newState.playerPos[moverIdx];
+      
+      // Считаем шаги с учетом круга
+      let steps = newPos - oldPos;
+      if (steps < 0) steps += TILES.length;
+      // Если steps === 0 (например попал в тюрьму или пропуск), анимацию можно пропустить, 
+      // но если кости выпали (dice > 0), значит движение было.
+      const diceSum = newState.dice[0] + newState.dice[1];
+      
+      // Анимация визуальная (используем сумму кубиков для красоты, даже если попал на варп)
+      // Для точности берем steps, если это обычный ход.
+      const stepsToAnimate = steps === 0 ? 0 : steps;
+
+      if (stepsToAnimate > 0) {
+        await animateMove(moverIdx, oldPos, stepsToAnimate);
+      }
+      
+      // 3. Обновляем глобальный стейт
+      setGameState(newState);
+    }
+    
+    setIsRolling(false);
+  };
+
+  const handleBuy = async () => {
     if (!buyPrompt) return;
-    const { tileId, playerIndex } = buyPrompt;
-
-    setOwnership((prev) => ({ ...prev, [tileId]: playerIndex }));
-    addMessage('System', `P${playerIndex + 1} bought ${TILES[tileId].name} for $${TILES[tileId].price}`);
-
-    setBuyPrompt(null);
-    setActivePlayer((p) => (p + 1) % playersCount);
+    const newState = await apiCall('/buy', 'POST', { tileId: buyPrompt.tileId });
+    if (newState) setGameState(newState);
   };
 
-  const handleSkipBuy = () => {
-    if (!buyPrompt) return;
-    const { tileId, playerIndex } = buyPrompt;
-
-    addMessage('System', `P${playerIndex + 1} skipped ${TILES[tileId].name}`);
-
-    setBuyPrompt(null);
-    setActivePlayer((p) => (p + 1) % playersCount);
+  const handleSkipBuy = async () => {
+    const newState = await apiCall('/skip_buy', 'POST');
+    if (newState) setGameState(newState);
   };
 
-  // ===== OPEN TRADE MODAL =====
+  const handleReset = async () => {
+    const newState = await apiCall('/reset', 'POST');
+    if (newState) {
+      setGameState(newState);
+      setVisualPlayerPos([0,0,0,0]);
+    }
+  };
+
+  // --- Trade Logic ---
   const openTradeSell = () => {
     const tileId = myOwnedTiles[0] ?? null;
     const target = (activePlayer + 1) % playersCount;
-
     setTradeForm({ mode: 'sell', tileId, target, priceFC: 500 });
     setTradeOpen(true);
   };
@@ -195,11 +259,10 @@ const Board = () => {
   const openTradeBuy = () => {
     const tileId = otherOwnedTiles[0] ?? null;
     const owner = tileId != null ? ownership[tileId] : null;
-
     setTradeForm({
       mode: 'buy',
       tileId,
-      target: owner ?? ((activePlayer + 1) % playersCount), // target = owner
+      target: owner ?? ((activePlayer + 1) % playersCount),
       priceFC: 500,
     });
     setTradeOpen(true);
@@ -228,7 +291,6 @@ const Board = () => {
 
   const onTradeTileChange = (nextTileIdRaw) => {
     const nextTileId = nextTileIdRaw === '' ? null : Number(nextTileIdRaw);
-
     setTradeForm((f) => {
       if (f.mode === 'buy') {
         const owner = nextTileId != null ? ownership[nextTileId] : f.target;
@@ -238,106 +300,51 @@ const Board = () => {
     });
   };
 
-  const createTradeOffer = () => {
+  const createTradeOffer = async () => {
     const priceFC = Math.max(0, Math.floor(Number(tradeForm.priceFC) || 0));
     const tileId = tradeForm.tileId != null ? Number(tradeForm.tileId) : null;
     const target = Number(tradeForm.target);
 
-    if (tileId == null) return addMessage('System', 'Trade: select a tile');
-    const tile = TILES[tileId];
+    // Валидация базовая, остальное проверит бек
+    if (tileId == null) return; 
 
-    if (!isPropertyBuyable(tile)) return addMessage('System', 'Trade: tile is not tradable');
-    if (!priceFC) return addMessage('System', 'Trade: price must be > 0');
-    if (target === activePlayer) return addMessage('System', 'Trade: cannot target yourself');
-
-    const ownerIdx = ownership[tileId];
-
-    if (tradeForm.mode === 'sell') {
-      if (ownerIdx !== activePlayer) return addMessage('System', 'Trade: you can SELL only your own tile');
-    } else {
-      if (ownerIdx == null) return addMessage('System', 'Trade: tile is not owned (just buy it on landing)');
-      if (ownerIdx !== target) return addMessage('System', 'Trade: target must be the current owner');
-    }
-
-    const offer = {
-      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      type: tradeForm.mode, // 'sell' | 'buy'
-      from: activePlayer,
+    const body = {
+      type: tradeForm.mode,
       to: target,
-      tileId,
-      priceFC,
-      createdAt: Date.now(),
+      tileId: tileId,
+      priceFC: priceFC
     };
 
-    setTradeOffers((prev) => [offer, ...prev]);
-
-    if (offer.type === 'sell') {
-      addMessage('System', `P${offer.from + 1} offers to SELL ${tile.name} to P${offer.to + 1} for ${offer.priceFC} FC`);
-    } else {
-      addMessage('System', `P${offer.from + 1} offers to BUY ${tile.name} from P${offer.to + 1} for ${offer.priceFC} FC`);
+    const newState = await apiCall('/offers', 'POST', body);
+    if (newState) {
+      setGameState(newState);
+      setTradeOpen(false);
     }
-
-    setTradeOpen(false);
   };
 
-  const removeOffer = (id) => setTradeOffers((prev) => prev.filter((o) => o.id !== id));
-
-  const acceptOffer = (id) => {
-    const offer = tradeOffers.find((o) => o.id === id);
-    if (!offer) return;
-
-    if (activePlayer !== offer.to) return addMessage('System', 'Accept offers only on your turn.');
-
-    const tile = TILES[offer.tileId];
-    const currentOwner = ownership[offer.tileId];
-
-    const seller = offer.type === 'sell' ? offer.from : offer.to;
-    const buyer = offer.type === 'sell' ? offer.to : offer.from;
-
-    if (currentOwner !== seller) {
-      addMessage('System', `Offer invalid: tile owner changed for ${tile.name}`);
-      removeOffer(id);
-      return;
-    }
-
-    if ((balances[buyer] ?? 0) < offer.priceFC) {
-      addMessage('System', `Deal failed: P${buyer + 1} has not enough FC`);
-      return;
-    }
-
-    setBalances((prev) => {
-      const next = [...prev];
-      next[buyer] -= offer.priceFC;
-      next[seller] += offer.priceFC;
-      return next;
-    });
-
-    setOwnership((prev) => ({ ...prev, [offer.tileId]: buyer }));
-
-    addMessage('System', `Deal: ${tile.name} P${seller + 1} → P${buyer + 1} for ${offer.priceFC} FC`);
-
-    removeOffer(id);
-    setActivePlayer((p) => (p + 1) % playersCount);
+  const acceptOffer = async (id) => {
+    const newState = await apiCall(`/offers/${id}/accept`, 'POST');
+    if (newState) setGameState(newState);
   };
 
-  const declineOffer = (id) => {
-    const offer = tradeOffers.find((o) => o.id === id);
-    if (!offer) return;
-
-    if (activePlayer !== offer.to) return addMessage('System', 'Decline offers only on your turn.');
-
-    addMessage('System', `Offer declined by P${offer.to + 1}`);
-    removeOffer(id);
-    setActivePlayer((p) => (p + 1) % playersCount);
+  const declineOffer = async (id) => {
+    const newState = await apiCall(`/offers/${id}/decline`, 'POST');
+    if (newState) setGameState(newState);
   };
 
-  // ===== CHAT AUTO SCROLL =====
+  // --- Chat Auto Scroll ---
   useEffect(() => {
     const el = chatListRef.current;
     if (!el) return;
     if (shouldStickToBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
+  // === RENDER LOADING ===
+  if (!gameState) {
+    return <div className="board-loading">Connecting to server... (Run backend on port 8000)</div>;
+  }
+
+  // === RENDER MAIN ===
   return (
     <div className="board-layout">
       <div className="monopoly-wrapper">
@@ -348,6 +355,8 @@ const Board = () => {
             <div className="center-logo">
               <h1 className="flare-title">FLAREPOLY</h1>
               <p className="flare-subtitle">REAL-TIME CRYPTO MONOPOLY</p>
+              {/* Reset кнопка для дебага */}
+              <button onClick={handleReset} style={{opacity: 0.3, fontSize: '10px'}}>RESET GAME</button>
             </div>
 
             <div className="game-controls">
@@ -357,13 +366,15 @@ const Board = () => {
                 <button
                   className="roll-btn"
                   onClick={handleRoll}
-                  disabled={!!buyPrompt || tradeOpen || incomingOffersForActive.length > 0}
+                  disabled={isRolling || !!buyPrompt || tradeOpen || incomingOffersForActive.length > 0}
                 >
-                  {buyPrompt || tradeOpen
-                    ? 'WAIT...'
-                    : incomingOffersForActive.length > 0
-                      ? 'OFFERS...'
-                      : 'ROLL DICE'}
+                  {isRolling 
+                    ? 'MOVING...'
+                    : buyPrompt || tradeOpen
+                      ? 'WAIT...'
+                      : incomingOffersForActive.length > 0
+                        ? 'OFFERS...'
+                        : `P${activePlayer + 1} ROLL`}
                 </button>
               </div>
 
@@ -382,18 +393,11 @@ const Board = () => {
                     <div key={i}><strong>{m.user}:</strong> {m.text}</div>
                   ))}
                 </div>
-
+                {/* Чат только для просмотра логов системы пока, ввод можно привязать к API позже */}
                 <input
                   className="chat-input"
-                  placeholder="Type..."
-                  value={chatMsg}
-                  onChange={(e) => setChatMsg(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && chatMsg) {
-                      addMessage('Me', chatMsg);
-                      setChatMsg('');
-                    }
-                  }}
+                  placeholder="System logs only..."
+                  disabled
                 />
               </div>
             </div>
@@ -401,14 +405,14 @@ const Board = () => {
 
           {/* --- TILES --- */}
           {TILES.map((tile) => {
+            // Используем вычисленный byTile для отображения фишек
             const playersHere = byTile[tile.id] || [];
             const gradient = buildConicGradient(playersHere);
             const activeHere = playersHere.includes(activePlayer);
             const activeColor = activeHere ? PLAYER_COLORS[activePlayer] : 'transparent';
 
-            const ownerIdx = ownership[tile.id];
-            const ownerColor = ownerIdx != null ? PLAYER_COLORS[ownerIdx] : null;
-
+            const ownerIdx = ownership[tile.id]; // Бекенд возвращает ownership[tileId]
+            
             return (
               <div
                 key={tile.id}
@@ -432,41 +436,26 @@ const Board = () => {
 
                 <div className="tile-content">
                   {tile.type === 'corner' ? (
-                    tile.subtype === 'gotojail' ? (
-                      <div className="corner-full">
-                        <img className="corner-full-img" src={`${base}images/SYSTEMBUG.png`} alt="SYSTEM BUG" loading="lazy" />
-                      </div>
+                     tile.subtype === 'gotojail' ? (
+                      <div className="corner-full"><img className="corner-full-img" src={`${base}images/SYSTEMBUG.png`} alt="BUG" /></div>
                     ) : tile.subtype === 'jail' ? (
-                      <div className="corner-full">
-                        <img className="corner-full-img" src={`${base}images/ACCOUNTBLOCKED.png`} alt="ACCOUNT BLOCKED" loading="lazy" />
-                      </div>
+                      <div className="corner-full"><img className="corner-full-img" src={`${base}images/ACCOUNTBLOCKED.png`} alt="BLOCKED" /></div>
                     ) : tile.subtype === 'go' ? (
-                      <div className="corner-full">
-                        <img className="corner-full-img" src={`${base}images/START.png`} alt="START" loading="lazy" />
-                      </div>
-                    ) : tile.subtype === 'parking' ? (
-                      <div className="corner-full">
-                        <img className="corner-full-img" src={`${base}images/SYSTEMDOWN.png`} alt="SYSTEM DOWN" loading="lazy" />
-                      </div>
+                      <div className="corner-full"><img className="corner-full-img" src={`${base}images/START.png`} alt="START" /></div>
                     ) : (
-                      <div className="corner-title">{tile.name}</div>
+                      <div className="corner-full"><img className="corner-full-img" src={`${base}images/SYSTEMDOWN.png`} alt="DOWN" /></div>
                     )
                   ) : tile.type === 'chance' ? (
-                    <div className="corner-full">
-                      <img className="corner-full-img" src={`${base}images/CHANCE.png`} alt="CHANCE" loading="lazy" />
-                    </div>
+                    <div className="corner-full"><img className="corner-full-img" src={`${base}images/CHANCE.png`} alt="CHANCE" /></div>
                   ) : tile.type === 'property' ? (
                     <>
                       <div className="token-icon-wrap">
-                        <img className="token-icon" src={getTokenIconSrc(tile)} alt={tile.name} loading="lazy" />
+                        <img className="token-icon" src={getTokenIconSrc(tile)} alt={tile.name} />
                       </div>
-
                       <div className="tile-name owned-name" data-owner={ownerIdx != null ? `p${ownerIdx + 1}` : ''}>
                         {tile.name}
                       </div>
-
                       {ownerIdx != null && <div className="owner-badge">P{ownerIdx + 1}</div>}
-
                       {tile.price != null && <div className="tile-price">${tile.price}</div>}
                     </>
                   ) : (
@@ -488,34 +477,33 @@ const Board = () => {
       <aside className="wallets-panel">
         <div className="wallets-title">PLAYERS</div>
 
-        {walletMocks.map((addr, idx) => (
+        {gameState.balances.map((bal, idx) => (
           <div key={idx} className={`wallet-card ${idx === activePlayer ? 'active' : ''}`}>
             <div className="wallet-left">
               <div className="player-dot" style={{ background: PLAYER_COLORS[idx] }} />
               <div className="wallet-meta">
                 <div className="wallet-name">PLAYER {idx + 1}</div>
-                <div className="wallet-addr">{addr}</div>
+                <div className="wallet-addr">0xWallet...{idx}</div>
               </div>
             </div>
 
             <div className="wallet-right">
-              <div className="wallet-chip">POS {playerPos[idx]}</div>
+              <div className="wallet-chip">POS {visualPlayerPos[idx]}</div>
               <div className="wallet-chip wallet-chip-coins">
-                <img className="flare-coin-icon" src={`${base}images/FLARE.png`} alt="FLARE" loading="lazy" />
-                {balances[idx]} FC
+                <img className="flare-coin-icon" src={`${base}images/FLARE.png`} alt="FC" />
+                {bal} FC
               </div>
             </div>
           </div>
         ))}
 
         <div className="wallet-actions">
-          <button className="buy-btn secondary" onClick={openTradeSell}>SELL STREET</button>
-          <button className="buy-btn secondary" onClick={openTradeBuy}>BUY STREET</button>
+          <button className="buy-btn secondary" onClick={openTradeSell} disabled={tradeOpen}>SELL STREET</button>
+          <button className="buy-btn secondary" onClick={openTradeBuy} disabled={tradeOpen}>BUY STREET</button>
         </div>
 
         <div className="wallet-offers">
           <div className="wallets-title">INCOMING OFFERS (P{activePlayer + 1})</div>
-
           {incomingOffersForActive.length === 0 ? (
             <div className="offers-empty">No offers</div>
           ) : (
@@ -531,13 +519,8 @@ const Board = () => {
                       <span className="offer-tile">{tile?.name}</span>
                     </div>
                   </div>
-
                   <div className="offer-bottom">
-                    <div className="offer-price">
-                      <img className="flare-coin-icon" src={`${base}images/FLARE.png`} alt="FLARE" loading="lazy" />
-                      {o.priceFC} FC
-                    </div>
-
+                    <div className="offer-price">{o.priceFC} FC</div>
                     <div className="offer-actions">
                       <button className="buy-btn secondary" onClick={() => declineOffer(o.id)}>DECLINE</button>
                       <button className="buy-btn primary" onClick={() => acceptOffer(o.id)}>ACCEPT</button>
@@ -548,17 +531,15 @@ const Board = () => {
             })
           )}
         </div>
-
-        <div className="wallets-hint">
-          Офферы принимаются/отклоняются только в свой ход. Сделка: улица ↔ FC.
-        </div>
       </aside>
 
       {/* --- MODAL: BUY ON LANDING --- */}
       {buyPrompt && (() => {
         const tile = TILES[buyPrompt.tileId];
         const pIdx = buyPrompt.playerIndex;
-
+        // Показываем модалку только если ход текущего активного игрока совпадает с prompt
+        // (Хотя бекенд блокирует ход, так что всё ок)
+        
         return (
           <div className="buy-modal-backdrop" onClick={handleSkipBuy}>
             <div className="buy-modal" onClick={(e) => e.stopPropagation()}>
@@ -577,7 +558,6 @@ const Board = () => {
                     <div className="buy-asset-sub">Player P{pIdx + 1} can buy this tile</div>
                   </div>
                 </div>
-
                 <div className="buy-price">
                   Price: <span className="buy-price-num">${tile.price}</span>
                 </div>
@@ -596,8 +576,9 @@ const Board = () => {
       {tradeOpen && (() => {
         const sellMode = tradeForm.mode === 'sell';
         const selectableTiles = sellMode ? myOwnedTiles : otherOwnedTiles;
-
         const tile = tradeForm.tileId != null ? TILES[tradeForm.tileId] : null;
+        
+        // Автоматически определяем владельца для режима BUY, если плитка выбрана
         const inferredOwner = tradeForm.tileId != null ? ownership[tradeForm.tileId] : null;
         const buyTarget = inferredOwner != null ? inferredOwner : tradeForm.target;
 
@@ -635,11 +616,10 @@ const Board = () => {
 
                 <div className="trade-row">
                   <div className="trade-label">{sellMode ? 'Sell to' : 'Owner'}</div>
-
                   <select
                     className="trade-select"
                     value={sellMode ? tradeForm.target : buyTarget}
-                    disabled={!sellMode}
+                    disabled={!sellMode} // В режиме покупки target определяется автоматически по владельцу плитки
                     onChange={(e) => setTradeForm((f) => ({ ...f, target: Number(e.target.value) }))}
                   >
                     {Array.from({ length: playersCount }, (_, i) => i)
@@ -666,10 +646,9 @@ const Board = () => {
                   <div className="trade-summary-balance">
                     Your balance: <span className="trade-balance-num">{balances[activePlayer]} FC</span>
                   </div>
-
                   {tile && (
                     <div className="trade-summary-tile">
-                      <div className="trade-summary-icon">
+                       <div className="trade-summary-icon">
                         <img src={getTokenIconSrc(tile)} alt={tile.name} />
                       </div>
                       <div className="trade-summary-meta">

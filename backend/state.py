@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-from .game import GameState
+from game import GameState
 
 GAME = GameState(players_count=4)
 

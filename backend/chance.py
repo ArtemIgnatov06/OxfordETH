@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Dict, Any
 import random
 
-from .player import Player
+from player import Player
 
 @dataclass
 class ChanceEvent:
