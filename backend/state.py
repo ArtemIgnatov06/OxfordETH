@@ -1,32 +1,27 @@
-from fastapi import HTTPException
-from game import GameState
+# In state.py imports:
+from chain.chain_fxrp import fxrp_client
 
-GAME = GameState(players_count=4)
+# Inside your Game class -> buy method:
+def buy(self, proof: SigProof, tile_id: int, tx_hash: str = None):
+    # 1. Calculate Cost (Your existing logic)
+    cost = self.get_tile_cost(tile_id) 
 
-def snapshot():
-    return GAME.to_front()
+    # 2. VERIFY PAYMENT (The new part)
+    if cost > 0:
+        if not tx_hash:
+            raise ValueError("❌ Payment required: Missing txHash")
+        
+        print(f"🕵️ Verifying payment of {cost} FXRP in tx {tx_hash}...")
+        
+        valid = fxrp_client.verify_payment(
+            tx_hash=tx_hash,
+            expected_payer=proof.address,
+            expected_amount=cost
+        )
+        
+        if not valid:
+            raise ValueError("❌ Payment verification failed. Check transaction.")
 
-def _wrap(fn):
-    try:
-        fn()
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-# convenience wrappers if you want to keep main.py clean:
-def safe_roll():
-    _wrap(GAME.roll)
-
-def safe_buy(tile_id=None):
-    _wrap(lambda: GAME.buy(tile_id))
-
-def safe_skip_buy():
-    _wrap(GAME.skip_buy)
-
-def safe_create_offer(*args, **kwargs):
-    _wrap(lambda: GAME.create_offer(*args, **kwargs))
-
-def safe_accept_offer(offer_id: str):
-    _wrap(lambda: GAME.accept_offer(offer_id))
-
-def safe_decline_offer(offer_id: str):
-    _wrap(lambda: GAME.decline_offer(offer_id))
+    # 3. If we get here, payment is real. Proceed with ownership logic.
+    self.assign_tile_to_player(tile_id, proof.address)
+    print("✅ Property purchased!")

@@ -1,11 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
 
-from state import GAME, snapshot
-from auth_sig import SigProof, build_action_message
-
+# Import your Game State and Auth
+from backend.state import GAME, snapshot
+from backend.auth_sig import SigProof, build_action_message
 
 app = FastAPI(title="FlarePoly Backend", version="0.2")
 
@@ -17,38 +17,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- MODELS ---
 
 class ProofBody(BaseModel):
     address: str
     message: str
     signature: str
 
-
 class ConnectWalletBody(BaseModel):
     playerIndex: int = Field(..., ge=0, le=3)
     proof: ProofBody
     expectedMessage: str
 
-
 class OfferCreateBody(BaseModel):
     type: Literal["sell", "buy"]
     to: int = Field(..., ge=0, le=3)
     tileId: int = Field(..., ge=0, le=23)
-    priceFXRP: int = Field(..., ge=1)  # raw units
+    priceFXRP: int = Field(..., ge=1)
 
-
-class BuyBody(BaseModel):
-    tileId: Optional[int] = Field(None, ge=0, le=23)
-
-
-class SignedActionBody(BaseModel):
-    proof: ProofBody
-
-
+# ✅ UPDATED: Added txHash to prove payment
 class SignedBuyBody(BaseModel):
     proof: ProofBody
     tileId: Optional[int] = Field(None, ge=0, le=23)
+    txHash: Optional[str] = None  # <--- NEW FIELD
 
+class SignedActionBody(BaseModel):
+    proof: ProofBody
 
 class SignedOfferCreateBody(BaseModel):
     proof: ProofBody
@@ -57,36 +51,13 @@ class SignedOfferCreateBody(BaseModel):
     tileId: int = Field(..., ge=0, le=23)
     priceFXRP: int = Field(..., ge=1)
 
+# --- ENDPOINTS ---
 
-class SignedSettleBody(BaseModel):
-    proof: ProofBody
-    txHash: str
+@app.get("/")
+def health_check():
+    return {"status": "online", "network": "Coston2"}
 
-
-@app.get("/state")
-def get_state():
-    return snapshot()
-
-
-@app.get("/action_message")
-def action_message(playerIndex: int, action: str, params: str = ""):
-    """
-    Frontend calls this to get the EXACT message to sign for the next action.
-    Uses current nonce+1 from GAME.
-    """
-    nonce = GAME.nonces[playerIndex] + 1
-    msg = build_action_message(
-        game_id="local",
-        chain_id=GAME.fxrp.w3.eth.chain_id,
-        player_index=playerIndex,
-        action=action,
-        params=params,
-        nonce=nonce,
-    )
-    return {"message": msg, "nonce": nonce}
-
-
-@app.post("/connect_wallet")
+@app.post("/connect")
 def connect_wallet(body: ConnectWalletBody):
     GAME.connect_wallet(
         player_index=body.playerIndex,
@@ -95,30 +66,33 @@ def connect_wallet(body: ConnectWalletBody):
     )
     return snapshot()
 
-
 @app.post("/reset")
 def reset():
     GAME.reset()
     return snapshot()
-
 
 @app.post("/roll")
 def roll(body: SignedActionBody):
     GAME.roll(SigProof(**body.proof.model_dump()))
     return snapshot()
 
-
 @app.post("/buy")
 def buy(body: SignedBuyBody):
-    GAME.buy(SigProof(**body.proof.model_dump()), tile_id=body.tileId)
+    """
+    Buys a property.
+    Requires 'txHash' in the body to verify on-chain payment.
+    """
+    GAME.buy(
+        proof=SigProof(**body.proof.model_dump()), 
+        tile_id=body.tileId,
+        tx_hash=body.txHash  # <--- PASSING THE HASH TO GAME LOGIC
+    )
     return snapshot()
-
 
 @app.post("/skip_buy")
 def skip_buy(body: SignedActionBody):
     GAME.skip_buy(SigProof(**body.proof.model_dump()))
     return snapshot()
-
 
 @app.post("/offers")
 def create_offer(body: SignedOfferCreateBody):
@@ -131,20 +105,20 @@ def create_offer(body: SignedOfferCreateBody):
     )
     return snapshot()
 
-
 @app.post("/offers/{offer_id}/accept")
 def accept_offer(offer_id: str, body: SignedActionBody):
     GAME.accept_offer(SigProof(**body.proof.model_dump()), offer_id)
     return snapshot()
-
 
 @app.post("/offers/{offer_id}/decline")
 def decline_offer(offer_id: str, body: SignedActionBody):
     GAME.decline_offer(SigProof(**body.proof.model_dump()), offer_id)
     return snapshot()
 
-
-@app.post("/settle")
-def settle(body: SignedSettleBody):
-    GAME.settle(SigProof(**body.proof.model_dump()), tx_hash=body.txHash)
-    return snapshot()
+# Helper for frontend to check balance
+@app.get("/player/{address}/balance")
+def get_balance(address: str):
+    # Lazy import to avoid circular dependency issues if they exist
+    from chain.chain_fxrp import fxrp_client
+    bal = fxrp_client.get_balance(address)
+    return {"address": address, "balance": bal}
