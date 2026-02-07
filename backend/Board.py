@@ -1,422 +1,326 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from typing import Any, Optional, Sequence
+import json
 import random
-from typing import Optional, Protocol, Sequence
+from pathlib import Path
 
 
 # =========================
-# Board domain model
+# Canonical layout (24 tiles, ids 0..23)
+# Schema aligned with BoardData.js:
+#   type: corner/property/chance/tax/action
+#   subtype (corners only): go/jail/parking/gotojail
 # =========================
 
-class CellType(Enum):
-    START = "START"
-    PROPERTY = "PROPERTY"
-    JAIL = "JAIL"
-    GO_TO_JAIL = "GO_TO_JAIL"
-    SERVER_DOWN = "SERVER_DOWN"
-    BUG = "BUG"
-    CHANCE = "CHANCE"
+DEFAULT_LAYOUT: list[dict[str, Any]] = [
+    # --- BOTTOM ROW (Right to Left) ---
+    {"id": 0, "type": "corner", "subtype": "go", "name": "START"},
+    {"id": 1, "type": "property", "family": "meme", "name": "DOGE", "assetId": "DOGE", "price": 0.12, "rent": 10},
+    {"id": 2, "type": "property", "family": "meme", "name": "PEPE", "assetId": "PEPE", "price": 0.00001, "rent": 5},
+    {"id": 3, "type": "chance", "name": "Chance"},
+    {"id": 4, "type": "property", "family": "meme", "name": "SHIB", "assetId": "SHIB", "price": 0.00002, "rent": 8},
+    {"id": 5, "type": "tax", "name": "Gas Fee", "price": 50},
+
+    # --- LEFT COLUMN (Bottom to Top) ---
+    {"id": 6, "type": "corner", "subtype": "jail", "name": "JAIL"},
+    {"id": 7, "type": "property", "family": "sol", "name": "SOL", "assetId": "SOL", "price": 145, "rent": 14},
+    {"id": 8, "type": "property", "family": "sol", "name": "JUP", "assetId": "JUP", "price": 1.2, "rent": 12},
+    {"id": 9, "type": "chance", "name": "Chance"},
+    {"id": 10, "type": "property", "family": "bnb", "name": "BNB", "assetId": "BNB", "price": 580, "rent": 50},
+    {"id": 11, "type": "property", "family": "bnb", "name": "CAKE", "assetId": "CAKE", "price": 2.5, "rent": 20},
+
+    # --- TOP ROW (Left to Right) ---
+    {"id": 12, "type": "corner", "subtype": "parking", "name": "HODL"},
+    {"id": 13, "type": "property", "family": "eth", "name": "ETH", "assetId": "ETH", "price": 2400, "rent": 200},
+    {"id": 14, "type": "property", "family": "eth", "name": "ARB", "assetId": "ARB", "price": 1.1, "rent": 15},
+    {"id": 15, "type": "chance", "name": "Chance"},
+    {"id": 16, "type": "property", "family": "eth", "name": "UNI", "assetId": "UNI", "price": 7.5, "rent": 18},
+    {"id": 17, "type": "tax", "name": "Rug Pull", "price": 100},
+
+    # --- RIGHT COLUMN (Top to Bottom) ---
+    {"id": 18, "type": "corner", "subtype": "gotojail", "name": "GO TO JAIL"},
+    {"id": 19, "type": "property", "family": "btc", "name": "BTC", "assetId": "BTC", "price": 65000, "rent": 500},
+    {"id": 20, "type": "property", "family": "btc", "name": "WBTC", "assetId": "WBTC", "price": 64900, "rent": 480},
+    {"id": 21, "type": "chance", "name": "Chance"},
+    {"id": 22, "type": "property", "family": "btc", "name": "STX", "assetId": "STX", "price": 1.8, "rent": 25},
+    {"id": 23, "type": "action", "name": "Airdrop"},
+]
 
 
-class AssetFamily(Enum):
-    BTC = "BTC"
-    ETH = "ETH"
-    SOL = "SOL"
-    BNB = "BNB"
-    MEME = "MEME"
+# =========================
+# Models
+# =========================
 
-
-@dataclass(frozen=True)
-class Asset:
+@dataclass
+class Player:
     id: str
-    family: AssetFamily
-    tier: int
+    position: int = 0
+    jailed: int = 0
+    frozen: int = 0
 
 
 @dataclass(frozen=True)
-class Cell:
-    index: int
-    type: CellType
-    asset: Optional[Asset] = None
-
-
-class ActionType(Enum):
-    ROLL_DICE = "ROLL_DICE"
-    DRAW_CHANCE = "DRAW_CHANCE"
-    BUY_PROPERTY = "BUY_PROPERTY"
-    PAY_RENT = "PAY_RENT"
-    UPGRADE = "UPGRADE"
-    END_TURN = "END_TURN"
-    SKIP_TURN = "SKIP_TURN"
-
-
-@dataclass(frozen=True)
-class AvailableActions:
-    """
-    What the UI should show as buttons + useful context.
-    Board computes these using mostly contract reads.
-    """
-    actions: list[ActionType]
-    landed_cell: Optional[Cell] = None
-    property_id: Optional[str] = None
-
-    # "truth" rendered from chain reads:
-    owner: Optional[str] = None
-    level: Optional[int] = None
-    player_balance: Optional[int] = None
-    asset_price: Optional[int] = None
-    property_price: Optional[int] = None
-
+class Action:
+    type: str
+    propertyId: Optional[str] = None
     reason: Optional[str] = None
 
 
 # =========================
-# External dependencies (interfaces only)
-# =========================
-
-class PlayerView(Protocol):
-    """
-    Minimal interface Board expects from your Player class/module.
-    Board does NOT define Player; it only needs these fields.
-    """
-    player_id: str            # can be wallet address for now
-    position: int
-    jailed_turns: int
-    frozen_turns: int
-
-
-class GameReader(Protocol):
-    """
-    READS from GameInstance (contract) to render truth.
-    Backed by web3.py later.
-    """
-    def get_asset_price(self, asset_id: str) -> int: ...
-    def get_property_price(self, property_id: str) -> int: ...
-    def owner_of(self, property_id: str) -> Optional[str]: ...
-    def level_of(self, property_id: str) -> int: ...
-    def balance_of(self, player_id: str) -> int: ...
-
-
-class TxRouter(Protocol):
-    """
-    Routes UI clicks to Transaction layer (which sends contract txs).
-    Board does NOT implement tx logic; it just calls these.
-    Returns tx hash string (or any identifier you choose).
-    """
-    def buy_property(self, property_id: str, player_id: str) -> str: ...
-    def pay_rent(self, property_id: str, player_id: str) -> str: ...
-    def upgrade_property(self, property_id: str, player_id: str) -> str: ...
-
-
-# =========================
-# BoardGame (Board-only)
+# BoardGame (in-memory prototype)
 # =========================
 
 class BoardGame:
     """
-    Off-chain responsibilities:
-      • Builds board layout (cells: start/jail/bug/server down/properties).
-      • Maintains turn order, dice, movement, “you landed here”.
-      • Determines which action buttons should be presented.
-
-    Contract usage:
-      • Mostly reads from GameReader to render truth:
-          - getAssetPrice(assetId) / getPropertyPrice(propertyId)
-          - ownerOf(propertyId), levelOf(propertyId)
-          - balanceOf(player)
-      • Triggers txs indirectly through TxRouter:
-          - “Buy”, “Pay rent”, “Upgrade” route to TxRouter.
+    Prototype in-memory game engine (no contracts).
+    - Layout is DEFAULT_LAYOUT (24 tiles, ids 0..23)
+    - Handles turns, dice, movement, gotojail->jail instant effect, and basic actions
     """
 
     def __init__(
         self,
-        players: Sequence[PlayerView],
-        game_reader: GameReader,
-        tx_router: TxRouter,
-        seed: Optional[int] = None
+        players: Sequence[Player],
+        layout: Optional[list[dict[str, Any]]] = None,
+        layout_path: Optional[str] = None,
+        seed: int = 7
     ):
         if len(players) < 2:
-            raise ValueError("Need at least 2 players.")
+            raise ValueError("Need at least 2 players")
 
-        self.players: list[PlayerView] = list(players)
-        self.game: GameReader = game_reader
-        self.tx: TxRouter = tx_router
+        if layout_path is not None:
+            layout = self.load_layout(layout_path)
+        if layout is None:
+            layout = DEFAULT_LAYOUT
 
+        self.layout = self.validate_layout(layout)
+        self.board_size = len(self.layout)
+
+        self.players = list(players)
+        self.turn_idx = 0
         self.rng = random.Random(seed)
 
-        self.current_player_idx: int = 0
-        self.cells: list[Cell] = []
-        self._initialize_board()
+        # off-chain ownership model (until contracts)
+        self.owner_of: dict[str, str] = {}   # assetId -> playerId
+        self.level_of: dict[str, int] = {}   # assetId -> level
 
-        # turn state
-        self.has_rolled_this_turn: bool = False
-        self.last_roll: Optional[int] = None
-        self.last_landed_cell: Optional[Cell] = None
+        # state for UI
+        self.last_dice: list[int] = [0, 0]
+        self.last_landed: Optional[dict[str, Any]] = None
+        self.available_actions: list[Action] = []
+        self.log: list[str] = []
 
-    # ---------- Board init ----------
+        self._recompute_actions()
 
-    def _create_assets(self) -> dict[str, Asset]:
-        return {
-            "BTC1": Asset("BTC1", AssetFamily.BTC, 1),
-            "BTC2": Asset("BTC2", AssetFamily.BTC, 2),
-            "BTC3": Asset("BTC3", AssetFamily.BTC, 3),
+    # ---------- layout helpers ----------
 
-            "ETH1": Asset("ETH1", AssetFamily.ETH, 1),
-            "ETH2": Asset("ETH2", AssetFamily.ETH, 2),
-            "ETH3": Asset("ETH3", AssetFamily.ETH, 3),
+    @staticmethod
+    def load_layout(path: str | Path) -> list[dict[str, Any]]:
+        p = Path(path)
+        if not p.exists():
+            raise FileNotFoundError(f"board layout not found: {p.resolve()}")
+        layout = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(layout, list) or not layout:
+            raise ValueError("board_layout.json must be a non-empty JSON array")
+        return layout
 
-            "SOL1": Asset("SOL1", AssetFamily.SOL, 1),
-            "SOL2": Asset("SOL2", AssetFamily.SOL, 2),
-            "SOL3": Asset("SOL3", AssetFamily.SOL, 3),
+    @staticmethod
+    def validate_layout(layout: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        ids = []
+        for t in layout:
+            if not isinstance(t, dict):
+                raise ValueError("Each tile must be an object")
+            if "id" not in t or "type" not in t:
+                raise ValueError("Each tile must include 'id' and 'type'")
+            if not isinstance(t["id"], int):
+                raise ValueError("tile.id must be int")
+            if not isinstance(t["type"], str):
+                raise ValueError("tile.type must be str")
+            ids.append(t["id"])
 
-            "BNB1": Asset("BNB1", AssetFamily.BNB, 1),
-            "BNB2": Asset("BNB2", AssetFamily.BNB, 2),
-            "BNB3": Asset("BNB3", AssetFamily.BNB, 3),
+        if len(set(ids)) != len(ids):
+            raise ValueError("tile ids must be unique")
 
-            "MEME1": Asset("MEME1", AssetFamily.MEME, 1),
-            "MEME2": Asset("MEME2", AssetFamily.MEME, 2),
-        }
+        n = len(layout)
+        if sorted(ids) != list(range(n)):
+            raise ValueError(f"tile ids must be contiguous 0..{n-1}, got {sorted(ids)}")
 
-    def _initialize_board(self) -> None:
-        assets = self._create_assets()
-        idx = 0
+        return layout
 
-        def add(cell_type: CellType, asset: Optional[Asset] = None):
-            nonlocal idx
-            self.cells.append(Cell(idx, cell_type, asset))
-            idx += 1
-
-        add(CellType.START)
-
-        # BTC family
-        add(CellType.PROPERTY, assets["BTC1"])
-        add(CellType.PROPERTY, assets["BTC2"])
-        add(CellType.PROPERTY, assets["BTC3"])
-
-        add(CellType.CHANCE)       # chance #1
-        add(CellType.SERVER_DOWN)  # server down
-
-        # ETH family
-        add(CellType.PROPERTY, assets["ETH1"])
-        add(CellType.PROPERTY, assets["ETH2"])
-        add(CellType.PROPERTY, assets["ETH3"])
-
-        add(CellType.CHANCE)       # chance #2
-        add(CellType.BUG)          # bug -> jail
-        add(CellType.JAIL)         # jail
-
-        # BNB family
-        add(CellType.PROPERTY, assets["BNB1"])
-        add(CellType.PROPERTY, assets["BNB2"])
-        add(CellType.PROPERTY, assets["BNB3"])
-
-        add(CellType.CHANCE)       # chance #3
-
-        # SOL family
-        add(CellType.PROPERTY, assets["SOL1"])
-        add(CellType.PROPERTY, assets["SOL2"])
-        add(CellType.PROPERTY, assets["SOL3"])
-
-        # Meme
-        add(CellType.PROPERTY, assets["MEME1"])
-        add(CellType.PROPERTY, assets["MEME2"])
-
-        add(CellType.CHANCE)       # chance #4
-        add(CellType.GO_TO_JAIL)   # go to jail
-
-    # ---------- Helpers ----------
+    # ---------- basic helpers ----------
 
     @property
-    def size(self) -> int:
-        return len(self.cells)
+    def current_player(self) -> Player:
+        return self.players[self.turn_idx]
 
-    @property
-    def current_player(self) -> PlayerView:
-        return self.players[self.current_player_idx]
+    def tile_at(self, pos: int) -> dict[str, Any]:
+        return self.layout[pos % self.board_size]
 
-    def get_cell(self, position: int) -> Cell:
-        return self.cells[position % len(self.cells)]
+    def find_corner_subtype_id(self, subtype: str) -> Optional[int]:
+        for t in self.layout:
+            if t.get("type") == "corner" and t.get("subtype") == subtype:
+                return t["id"]
+        return None
 
-    # ---------- Dice + Movement ----------
+    # ---------- core flow ----------
 
-    def roll_dice(self) -> int:
-        """
-        1d6 dice for movement (prototype).
-        Dice used ONLY for movement (as you specified).
-        """
+    def roll_and_move(self) -> dict[str, Any]:
         p = self.current_player
 
-        if p.frozen_turns > 0:
-            raise RuntimeError("Frozen (SERVER_DOWN): must skip turn.")
-        if p.jailed_turns > 0:
-            raise RuntimeError("Jailed: must skip turn.")
-        if self.has_rolled_this_turn:
-            raise RuntimeError("Already rolled this turn.")
+        if p.frozen > 0:
+            raise ValueError("Frozen: must skip turn")
+        if p.jailed > 0:
+            raise ValueError("Jailed: must skip turn")
 
-        roll = self.rng.randint(1, 6)
-        self.has_rolled_this_turn = True
-        self.last_roll = roll
-        return roll
+        d1 = self.rng.randint(1, 6)
+        d2 = self.rng.randint(1, 6)
+        steps = d1 + d2
 
-    def move_current_player(self) -> Cell:
-        """
-        Moves current player by last_roll and applies immediate cell effects.
-        """
-        if not self.has_rolled_this_turn or self.last_roll is None:
-            raise RuntimeError("Roll dice before moving.")
+        old = p.position
+        p.position = (p.position + steps) % self.board_size
 
-        p = self.current_player
-        p.position = (p.position + self.last_roll) % len(self.cells)
-        landed = self.get_cell(p.position)
-        self.last_landed_cell = landed
+        tile = self.tile_at(p.position)
+        self.last_dice = [d1, d2]
+        self.last_landed = dict(tile)
 
-        # Apply off-chain immediate effects (still board logic)
-        self._apply_instant_cell_effects(p, landed)
-        return self.last_landed_cell
+        self.log.append(f"{p.id} rolled {steps} ({d1}+{d2})")
+        self.log.append(f"{p.id} moved {old} -> {p.position} landed on {tile.get('name', tile.get('type'))}")
 
-    def _apply_instant_cell_effects(self, p: PlayerView, cell: Cell) -> None:
-        # BUG or GO_TO_JAIL sends to jail
-        if cell.type in (CellType.BUG, CellType.GO_TO_JAIL):
-            self._send_to_jail(p)
+        self._apply_instant_effects(p, tile)
+        self._recompute_actions()
+        return self.state()
 
-        # SERVER_DOWN freezes next turn (example: 1 turn)
-        if cell.type == CellType.SERVER_DOWN:
-            p.frozen_turns = max(p.frozen_turns, 1)
+    def _apply_instant_effects(self, p: Player, tile: dict[str, Any]) -> None:
+        t = tile.get("type")
 
-    def _send_to_jail(self, p: PlayerView) -> None:
-        jail_idx = next(i for i, c in enumerate(self.cells) if c.type == CellType.JAIL)
-        p.position = jail_idx
-        p.jailed_turns = max(p.jailed_turns, 1)
-        self.last_landed_cell = self.get_cell(p.position)
+        # Corner: GO TO JAIL -> JAIL
+        if t == "corner" and tile.get("subtype") == "gotojail":
+            jail_id = self.find_corner_subtype_id("jail")
+            if jail_id is not None:
+                p.position = jail_id
+                p.jailed = max(p.jailed, 1)
+                jail_tile = self.tile_at(jail_id)
+                self.last_landed = dict(jail_tile)
+                self.log.append(f"{p.id} sent to JAIL (tile {jail_id})")
 
-    # ---------- UI action computation (with contract reads) ----------
+        # Tax/action are stubs for now (wallet logic later)
+        if t == "tax":
+            self.log.append(f"{p.id} hit tax tile '{tile.get('name')}' (stub)")
+        if t == "action":
+            self.log.append(f"{p.id} triggered action tile '{tile.get('name')}' (stub)")
 
-    def get_available_actions(self) -> AvailableActions:
-        """
-        UI uses this to decide which buttons to show.
-        Uses GameReader reads to render truth and determine relevant tx actions.
-        """
+    def end_turn(self) -> dict[str, Any]:
         p = self.current_player
 
-        # frozen/jailed => only SKIP
-        if p.frozen_turns > 0:
-            return AvailableActions(
-                actions=[ActionType.SKIP_TURN],
-                landed_cell=self.get_cell(p.position),
-                reason="SERVER_DOWN"
-            )
-        if p.jailed_turns > 0:
-            return AvailableActions(
-                actions=[ActionType.SKIP_TURN],
-                landed_cell=self.get_cell(p.position),
-                reason="IN_JAIL"
-            )
+        if p.frozen > 0:
+            p.frozen -= 1
+        if p.jailed > 0:
+            p.jailed -= 1
 
-        # not rolled => ROLL
-        if not self.has_rolled_this_turn:
-            return AvailableActions(actions=[ActionType.ROLL_DICE])
+        self.last_dice = [0, 0]
+        self.last_landed = None
 
-        # rolled but not moved (depends on how your UI is wired)
-        if self.last_landed_cell is None:
-            return AvailableActions(
-                actions=[ActionType.END_TURN],
-                reason="Call move_current_player() after roll"
-            )
+        self.turn_idx = (self.turn_idx + 1) % len(self.players)
+        self.log.append(f"Next player: {self.current_player.id}")
 
-        cell = self.last_landed_cell
+        self._recompute_actions()
+        return self.state()
 
-        if cell.type == CellType.CHANCE:
-            return AvailableActions(
-                actions=[ActionType.DRAW_CHANCE, ActionType.END_TURN],
-                landed_cell=cell
-            )
+    # ---------- UI actions ----------
 
-        if cell.type == CellType.PROPERTY and cell.asset is not None:
-            prop_id = cell.asset.id
+    def _recompute_actions(self) -> None:
+        p = self.current_player
+        self.available_actions = []
 
-            owner = self.game.owner_of(prop_id)
-            level = self.game.level_of(prop_id)
-            bal = self.game.balance_of(p.player_id)
+        if p.frozen > 0:
+            self.available_actions = [Action(type="SKIP_TURN", reason="FROZEN")]
+            return
+        if p.jailed > 0:
+            self.available_actions = [Action(type="SKIP_TURN", reason="IN_JAIL")]
+            return
 
-            # pricing reads (useful for UI panels)
-            asset_price = self.game.get_asset_price(cell.asset.id)
-            prop_price = self.game.get_property_price(prop_id)
+        if self.last_landed is None:
+            self.available_actions = [Action(type="ROLL_DICE")]
+            return
+
+        t = self.last_landed.get("type")
+
+        if t == "chance":
+            self.available_actions = [Action(type="DRAW_CHANCE"), Action(type="END_TURN")]
+            return
+
+        if t == "property":
+            prop_id = self.last_landed.get("assetId")
+            owner = self.owner_of.get(prop_id)
 
             if owner is None:
-                return AvailableActions(
-                    actions=[ActionType.BUY_PROPERTY, ActionType.END_TURN],
-                    landed_cell=cell,
-                    property_id=prop_id,
-                    owner=owner,
-                    level=level,
-                    player_balance=bal,
-                    asset_price=asset_price,
-                    property_price=prop_price
-                )
+                self.available_actions = [Action(type="BUY_PROPERTY", propertyId=prop_id), Action(type="END_TURN")]
+            elif owner != p.id:
+                self.available_actions = [Action(type="PAY_RENT", propertyId=prop_id), Action(type="END_TURN")]
+            else:
+                self.available_actions = [Action(type="UPGRADE", propertyId=prop_id), Action(type="END_TURN")]
+            return
 
-            if owner.lower() != p.player_id.lower():
-                return AvailableActions(
-                    actions=[ActionType.PAY_RENT, ActionType.END_TURN],
-                    landed_cell=cell,
-                    property_id=prop_id,
-                    owner=owner,
-                    level=level,
-                    player_balance=bal,
-                    asset_price=asset_price,
-                    property_price=prop_price
-                )
+        self.available_actions = [Action(type="END_TURN")]
 
-            # owned by the player => allow UPGRADE
-            return AvailableActions(
-                actions=[ActionType.UPGRADE, ActionType.END_TURN],
-                landed_cell=cell,
-                property_id=prop_id,
-                owner=owner,
-                level=level,
-                player_balance=bal,
-                asset_price=asset_price,
-                property_price=prop_price
-            )
-
-        return AvailableActions(actions=[ActionType.END_TURN], landed_cell=cell)
-
-    # ---------- Button click routing (Board -> TxRouter) ----------
-
-    def click_buy(self, property_id: str) -> str:
-        """
-        UI 'Buy' button -> routes to Transaction layer -> contract buyProperty(propertyId)
-        """
-        return self.tx.buy_property(property_id=property_id, player_id=self.current_player.player_id)
-
-    def click_pay_rent(self, property_id: str) -> str:
-        """
-        UI 'Pay rent' button -> routes to Transaction layer -> contract payRent(propertyId)
-        """
-        return self.tx.pay_rent(property_id=property_id, player_id=self.current_player.player_id)
-
-    def click_upgrade(self, property_id: str) -> str:
-        """
-        UI 'Upgrade' button -> routes to Transaction layer -> contract upgradeProperty(propertyId)
-        """
-        return self.tx.upgrade_property(property_id=property_id, player_id=self.current_player.player_id)
-
-    # ---------- Turn progression ----------
-
-    def end_turn(self) -> None:
-        """
-        Advances to next player, decrements jail/freeze counters, resets turn state.
-        """
+    def perform_action(self, action_type: str, property_id: Optional[str] = None) -> dict[str, Any]:
         p = self.current_player
 
-        if p.frozen_turns > 0:
-            p.frozen_turns -= 1
-        if p.jailed_turns > 0:
-            p.jailed_turns -= 1
+        if action_type in ("END_TURN", "SKIP_TURN"):
+            return self.end_turn()
 
-        self.has_rolled_this_turn = False
-        self.last_roll = None
-        self.last_landed_cell = None
+        if action_type == "DRAW_CHANCE":
+            self.log.append(f"{p.id} drew chance (stub)")
+            self._recompute_actions()
+            return self.state()
 
-        self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
+        if action_type == "BUY_PROPERTY":
+            if not property_id:
+                raise ValueError("propertyId required")
+            if self.owner_of.get(property_id) is not None:
+                raise ValueError("Already owned")
+            self.owner_of[property_id] = p.id
+            self.level_of[property_id] = 0
+            self.log.append(f"{p.id} bought {property_id} (stub)")
+            self._recompute_actions()
+            return self.state()
+
+        if action_type == "PAY_RENT":
+            if not property_id:
+                raise ValueError("propertyId required")
+            owner = self.owner_of.get(property_id)
+            if owner is None:
+                raise ValueError("Not owned")
+            if owner == p.id:
+                raise ValueError("Cannot pay yourself")
+            self.log.append(f"{p.id} paid rent for {property_id} to {owner} (stub)")
+            self._recompute_actions()
+            return self.state()
+
+        if action_type == "UPGRADE":
+            if not property_id:
+                raise ValueError("propertyId required")
+            owner = self.owner_of.get(property_id)
+            if owner != p.id:
+                raise ValueError("Only owner can upgrade")
+            self.level_of[property_id] = self.level_of.get(property_id, 0) + 1
+            self.log.append(f"{p.id} upgraded {property_id} to level {self.level_of[property_id]} (stub)")
+            self._recompute_actions()
+            return self.state()
+
+        raise ValueError(f"Unknown action: {action_type}")
+
+    # ---------- API state ----------
+
+    def state(self) -> dict[str, Any]:
+        return {
+            "boardSize": self.board_size,
+            "players": [{"id": p.id, "position": p.position, "jailed": p.jailed, "frozen": p.frozen} for p in self.players],
+            "currentPlayerId": self.current_player.id,
+            "dice": self.last_dice,
+            "lastLanded": self.last_landed,
+            "availableActions": [a.__dict__ for a in self.available_actions],
+            "log": self.log[-50:],
+        }
+
