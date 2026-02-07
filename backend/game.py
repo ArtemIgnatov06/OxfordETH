@@ -13,9 +13,8 @@ OfferType = Literal["sell", "buy"]
 START_TILE_ID = 0
 START_BONUS_FC = 200
 PRISON_WAIT_TURNS = 1
-skip_turns: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
 PRISON_TILE_ID = 6        # waits / skips next turn
-
+GOTO_PRISON_TILE_ID = 18
 
 
 @dataclass
@@ -55,6 +54,7 @@ class GameState:
     game_over: bool = False
     winner: Optional[int] = None
     chance_deck: ChanceDeck = field(default_factory=ChanceDeck)
+    skip_turns: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
 
     # tileId -> ownerIndex
     ownership: Dict[int, int] = field(default_factory=dict)
@@ -83,6 +83,7 @@ class GameState:
         self.eliminated = [False] * self.players_count
         self.game_over = False
         self.winner = None
+        self.skip_turns = [0] * self.players_count
 
     # ----- helpers -----
 
@@ -205,6 +206,12 @@ class GameState:
         self.add_message("Player", f"P{p+1} rolled {steps} ({d1} + {d2})")
 
         final_pos = self._move(p, steps)
+        if final_pos == GOTO_PRISON_TILE_ID:
+            self.player_pos[p] = PRISON_TILE_ID
+            self.skip_turns[p] += PRISON_WAIT_TURNS
+            self.add_message("System", f"P{p + 1} hit SYSTEM BUG → Prison (skip next turn)")
+            self.next_player()
+            return
 
         # prison -> skip next turn
         if final_pos == PRISON_TILE_ID:
@@ -332,18 +339,25 @@ class GameState:
             return
 
         if self.balances[buyer] < offer.price_fc:
-            raise ValueError(f"Deal failed: P{buyer+1} has not enough FC")
+            raise ValueError(f"Deal failed: P{buyer + 1} has not enough FC")
 
-        # transfer FC
         # transfer FC
         self.balances[buyer] -= offer.price_fc
         self.balances[seller] += offer.price_fc
 
-        # IMPORTANT: evaluate bankruptcy/win immediately after balance change
+        # bankruptcy / win check
         self._check_bankruptcy_and_win()
         if self.game_over:
             self._remove_offer(offer_id)
             return
+
+        # transfer tile ownership
+        self.ownership[offer.tile_id] = buyer
+
+        self.add_message("System", f"Deal: {tile.name} P{seller + 1} → P{buyer + 1} for {offer.price_fc} FC")
+
+        self._remove_offer(offer_id)
+        self.next_player()
 
     def decline_offer(self, offer_id: str):
         offer = self._find_offer(offer_id)
