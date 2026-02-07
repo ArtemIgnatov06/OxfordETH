@@ -1,120 +1,82 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Literal
+from typing import Literal, Optional
 
-from models import Player, Wallet, Board, Cell, Street, NewsCell, StartCell, ChanceDeck, TradeOffer
-from game import Game
-from storage import save_state
-import random
+from state import GAME, snapshot
 
-app = FastAPI()
 
-# ---- Create initial game (edit prices/ids to match your map)
-def make_game() -> Game:
-    players = [
-        Player(0, "P1", 0, Wallet(4200)),
-        Player(1, "P2", 0, Wallet(1337)),
-        Player(2, "P3", 0, Wallet(777)),
-        Player(3, "P4", 0, Wallet(9001)),
-    ]
+app = FastAPI(title="FlarePoly Backend", version="0.1")
 
-    cells = [Cell(i, f"Cell {i}") for i in range(24)]
-    cells[0] = StartCell(0, "Start")
-    for nid in [3, 9, 16, 22]:
-        cells[nid] = NewsCell(nid, "News")
+# CORS (под Vite обычно нужно)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # в проде ограничь
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    street_ids = [1,2,4,5,6,7,8,10,11,12,13,14,15,17]  # 14 streets
-    price = 200
-    for sid in street_ids:
-        cells[sid] = Street(sid, f"Street {sid}", price)
-        price += 50
 
-    board = Board(cells)
-    chance = ChanceDeck()
-    return Game(players, board, chance)
-
-game = make_game()
-save_state(game.to_state())
-
-# ---- API DTOs
-class RollReq(BaseModel):
-    playerId: int
-
-class OfferReq(BaseModel):
+class OfferCreateBody(BaseModel):
     type: Literal["sell", "buy"]
-    fromPlayer: int
-    toPlayer: int
-    cellId: int
-    price: int = Field(gt=0)
+    to: int = Field(..., ge=0, le=3)
+    tileId: int = Field(..., ge=0, le=23)
+    priceFC: int = Field(..., ge=1)
 
-class AcceptReq(BaseModel):
-    playerId: int
+
+class BuyBody(BaseModel):
+    tileId: Optional[int] = Field(None, ge=0, le=23)
+
 
 @app.get("/state")
 def get_state():
-    return game.to_state()
+    return snapshot()
+
 
 @app.post("/reset")
 def reset():
-    global game
-    game = make_game()
-    save_state(game.to_state())
-    return game.to_state()
+    GAME.reset()
+    return snapshot()
+
 
 @app.post("/roll")
-def roll(req: RollReq):
-    try:
-        result = game.roll_and_move(req.playerId)
-        st = game.to_state()
-        save_state(st)
-        return {"result": result, "state": st}
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+def roll():
+    # Roll: backend сам решает, можно ли ходить (если висит buyPrompt или входящие офферы)
+    GAME.roll()
+    return snapshot()
+
 
 @app.post("/buy")
-def buy(req: RollReq):
-    try:
-        game.buy_pending(req.playerId)
-        st = game.to_state()
-        save_state(st)
-        return st
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+def buy(body: BuyBody):
+    GAME.buy(tile_id=body.tileId)
+    return snapshot()
 
-@app.post("/skip")
-def skip(req: RollReq):
-    try:
-        game.skip_pending(req.playerId)
-        st = game.to_state()
-        save_state(st)
-        return st
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+
+@app.post("/skip_buy")
+def skip_buy():
+    GAME.skip_buy()
+    return snapshot()
+
 
 @app.post("/offers")
-def create_offer(req: OfferReq):
-    try:
-        offer = TradeOffer(
-            id=str(random.randint(10**8, 10**9 - 1)),
-            type=req.type,
-            from_player=req.fromPlayer,
-            to_player=req.toPlayer,
-            cell_id=req.cellId,
-            price=req.price,
-        )
-        game.create_offer(offer)
-        st = game.to_state()
-        save_state(st)
-        return st
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+def create_offer(body: OfferCreateBody):
+    GAME.create_offer(
+        offer_type=body.type,
+        to_player=body.to,
+        tile_id=body.tileId,
+        price_fc=body.priceFC,
+    )
+    return snapshot()
+
 
 @app.post("/offers/{offer_id}/accept")
-def accept_offer(offer_id: str, req: AcceptReq):
-    try:
-        game.accept_offer(offer_id, req.playerId)
-        st = game.to_state()
-        save_state(st)
-        return st
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+def accept_offer(offer_id: str):
+    GAME.accept_offer(offer_id)
+    return snapshot()
+
+
+@app.post("/offers/{offer_id}/decline")
+def decline_offer(offer_id: str):
+    GAME.decline_offer(offer_id)
+    return snapshot()

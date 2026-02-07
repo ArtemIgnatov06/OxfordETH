@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from .wallet import Wallet
+from wallet import Wallet
 
 @dataclass
 class Player:
