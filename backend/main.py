@@ -1,13 +1,13 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
 
-# Import your Game State and Auth
-from backend.state import GAME, snapshot
-from backend.auth_sig import SigProof, build_action_message
+from state import GAME, snapshot
+from auth_sig import SigProof, build_action_message
 
-app = FastAPI(title="FlarePoly Backend", version="0.2")
+
+app = FastAPI(title="FlarePoly Backend", version="0.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -17,7 +17,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- MODELS ---
+
+# ---------- MODELS ----------
 
 class ProofBody(BaseModel):
     address: str
@@ -29,33 +30,51 @@ class ConnectWalletBody(BaseModel):
     proof: ProofBody
     expectedMessage: str
 
-class OfferCreateBody(BaseModel):
-    type: Literal["sell", "buy"]
-    to: int = Field(..., ge=0, le=3)
-    tileId: int = Field(..., ge=0, le=23)
-    priceFXRP: int = Field(..., ge=1)
+class SignedActionBody(BaseModel):
+    proof: ProofBody
 
-# ✅ UPDATED: Added txHash to prove payment
 class SignedBuyBody(BaseModel):
     proof: ProofBody
     tileId: Optional[int] = Field(None, ge=0, le=23)
-    txHash: Optional[str] = None  # <--- NEW FIELD
-
-class SignedActionBody(BaseModel):
-    proof: ProofBody
 
 class SignedOfferCreateBody(BaseModel):
     proof: ProofBody
     type: Literal["sell", "buy"]
     to: int = Field(..., ge=0, le=3)
     tileId: int = Field(..., ge=0, le=23)
-    priceFXRP: int = Field(..., ge=1)
+    priceFC: int = Field(..., ge=1)  # keep FC for frontend mapping
 
-# --- ENDPOINTS ---
+class SignedSettleBody(BaseModel):
+    proof: ProofBody
+    txHash: str
+
+
+# ---------- ENDPOINTS ----------
 
 @app.get("/")
 def health_check():
-    return {"status": "online", "network": "Coston2"}
+    return {"status": "online"}
+
+@app.get("/state")
+def get_state():
+    return snapshot()
+
+@app.get("/action_message")
+def action_message(playerIndex: int, action: str, params: str = ""):
+    """
+    Frontend calls this to get the EXACT message to sign for the next action.
+    Nonce is taken from GAME.nonces[playerIndex] + 1.
+    """
+    nonce = GAME.nonces[playerIndex] + 1
+    msg = build_action_message(
+        game_id="local",
+        chain_id=GAME.fxrp.w3.eth.chain_id if hasattr(GAME, "fxrp") else 0,  # safe if you stub during dev
+        player_index=playerIndex,
+        action=action,
+        params=params,
+        nonce=nonce,
+    )
+    return {"message": msg, "nonce": nonce}
 
 @app.post("/connect")
 def connect_wallet(body: ConnectWalletBody):
@@ -79,14 +98,10 @@ def roll(body: SignedActionBody):
 @app.post("/buy")
 def buy(body: SignedBuyBody):
     """
-    Buys a property.
-    Requires 'txHash' in the body to verify on-chain payment.
+    Stage 1: creates pendingSettlement for a property purchase.
+    Frontend then asks user to send FXRP on-chain.
     """
-    GAME.buy(
-        proof=SigProof(**body.proof.model_dump()), 
-        tile_id=body.tileId,
-        tx_hash=body.txHash  # <--- PASSING THE HASH TO GAME LOGIC
-    )
+    GAME.buy(proof=SigProof(**body.proof.model_dump()), tile_id=body.tileId)
     return snapshot()
 
 @app.post("/skip_buy")
@@ -101,7 +116,7 @@ def create_offer(body: SignedOfferCreateBody):
         offer_type=body.type,
         to_player=body.to,
         tile_id=body.tileId,
-        price_fxrp_raw=body.priceFXRP,
+        price_fc=body.priceFC,
     )
     return snapshot()
 
@@ -115,10 +130,17 @@ def decline_offer(offer_id: str, body: SignedActionBody):
     GAME.decline_offer(SigProof(**body.proof.model_dump()), offer_id)
     return snapshot()
 
-# Helper for frontend to check balance
+@app.post("/settle")
+def settle(body: SignedSettleBody):
+    """
+    Stage 2: verify the on-chain FXRP transfer and finalize the buy/trade.
+    """
+    GAME.settle(SigProof(**body.proof.model_dump()), tx_hash=body.txHash)
+    return snapshot()
+
 @app.get("/player/{address}/balance")
 def get_balance(address: str):
-    # Lazy import to avoid circular dependency issues if they exist
+    # IMPORTANT: match your actual chain_fxrp import path
     from chain.chain_fxrp import fxrp_client
     bal = fxrp_client.get_balance(address)
     return {"address": address, "balance": bal}
