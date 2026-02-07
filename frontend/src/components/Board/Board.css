@@ -356,3 +356,217 @@
   background: linear-gradient(45deg, #3b82f6, #8b5cf6);
   color: #fff;
 }
+
+/* ====== OWNERSHIP (через data-owner) ====== */
+/* Пример: красим имя улицы по владельцу */
+.owned-name[data-owner="p1"] { color: #22c55e; }
+.owned-name[data-owner="p2"] { color: #3b82f6; }
+.owned-name[data-owner="p3"] { color: #a855f7; }
+.owned-name[data-owner="p4"] { color: #f97316; }
+
+/* Пример: легкая подсветка рамки клетки по владельцу (если хочешь) */
+.tile.owned[data-owner="p1"] { box-shadow: inset 0 0 0 2px rgba(34,197,94,0.35); }
+.tile.owned[data-owner="p2"] { box-shadow: inset 0 0 0 2px rgba(59,130,246,0.35); }
+.tile.owned[data-owner="p3"] { box-shadow: inset 0 0 0 2px rgba(168,85,247,0.35); }
+.tile.owned[data-owner="p4"] { box-shadow: inset 0 0 0 2px rgba(249,115,22,0.35); }
+
+/* ID в углу клетки (я заменил inline-style на класс) */
+.tile-id {
+  position: absolute;
+  bottom: 1px;
+  right: 2px;
+  font-size: 8px;
+  opacity: 0.3;
+}
+
+/* ====== WALLET PANEL ADDONS ====== */
+.wallet-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.wallet-offers {
+  margin-top: 12px;
+}
+
+.offers-empty {
+  font-size: 12px;
+  color: #94a3b8;
+  padding: 8px 2px;
+}
+
+/* ====== OFFER CARD ====== */
+.offer-card {
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(30, 41, 59, 0.45);
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.offer-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.offer-type {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(0,0,0,0.25);
+}
+
+/* Можно по-разному подсвечивать */
+.offer-type-sell { /* например: */ }
+.offer-type-buy  { /* например: */ }
+
+.offer-text {
+  font-size: 12px;
+  color: #e2e8f0;
+}
+
+.offer-tile {
+  font-weight: 900;
+}
+
+/* optional: раскраска "P1/P2..." в тексте оффера */
+.offer-from.p1 { color: #22c55e; font-weight: 900; }
+.offer-from.p2 { color: #3b82f6; font-weight: 900; }
+.offer-from.p3 { color: #a855f7; font-weight: 900; }
+.offer-from.p4 { color: #f97316; font-weight: 900; }
+
+.offer-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.offer-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 900;
+  font-size: 12px;
+  color: #e2e8f0;
+}
+
+.offer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ====== TRADE MODAL ADDONS ====== */
+.trade-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.trade-tab {
+  border: 1px solid rgba(148,163,184,0.16);
+  background: rgba(148,163,184,0.10);
+  color: #e2e8f0;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.trade-tab.active {
+  border-color: rgba(255,255,255,0.22);
+  background: rgba(0,0,0,0.22);
+}
+
+.trade-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.trade-label {
+  font-size: 12px;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.trade-select,
+.trade-input {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(148,163,184,0.16);
+  background: rgba(0,0,0,0.22);
+  color: #e2e8f0;
+  padding: 10px 10px;
+  outline: none;
+}
+
+.trade-input::-webkit-outer-spin-button,
+.trade-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* summary block */
+.trade-summary {
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(148,163,184,0.14);
+  background: rgba(0,0,0,0.20);
+}
+
+.trade-summary-balance {
+  font-size: 12px;
+  color: #cbd5e1;
+  margin-bottom: 10px;
+}
+
+.trade-balance-num {
+  font-weight: 900;
+  color: #e2e8f0;
+}
+
+.trade-summary-tile {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.trade-summary-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid rgba(148,163,184,0.16);
+  background: rgba(0,0,0,0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.trade-summary-icon img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 10px rgba(0,0,0,0.35));
+}
+
+.trade-summary-name {
+  font-weight: 900;
+  color: #e2e8f0;
+}
+
+.trade-summary-sub {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
