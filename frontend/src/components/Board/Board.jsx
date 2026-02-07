@@ -152,9 +152,19 @@ const Board = () => {
                     <div className="corner-title">{tile.name}</div>
                 )
                 ) : tile.type === 'chance' ? (
-                // CHANCE
-                <div style={{ color: '#a5b4fc' }}>❓<br />CHANCE</div>
-              ) : tile.type === 'property' ? (
+                <div className="corner-full">
+                    <img
+                    className="corner-full-img"
+                    src={`${base}images/CHANCE.png`}
+                    alt="CHANCE"
+                    loading="lazy"
+                    />
+                    <div className="corner-overlay">
+                    <div className="corner-title-big"></div>
+                    </div>
+                </div>
+                ) : tile.type === 'property' ? (
+
                 // PROPERTY: иконка + название + цена
                 <>
                   <div className="token-icon-wrap">
