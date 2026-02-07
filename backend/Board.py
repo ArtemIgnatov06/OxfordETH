@@ -1,9 +1,14 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum
 import random
-from typing import Optional
+from typing import Optional, Protocol, Sequence
 
+
+# =========================
+# Board domain model
+# =========================
 
 class CellType(Enum):
     START = "START"
@@ -37,64 +42,120 @@ class Cell:
     asset: Optional[Asset] = None
 
 
-@dataclass
-class Player:
-    player_id: str
-    position: int = 0
-    jailed_turns: int = 0
-    frozen_turns: int = 0  # for SERVER_DOWN
-
-
 class ActionType(Enum):
     ROLL_DICE = "ROLL_DICE"
+    DRAW_CHANCE = "DRAW_CHANCE"
     BUY_PROPERTY = "BUY_PROPERTY"
     PAY_RENT = "PAY_RENT"
-    DRAW_CHANCE = "DRAW_CHANCE"
+    UPGRADE = "UPGRADE"
     END_TURN = "END_TURN"
-    SKIP_TURN = "SKIP_TURN"  # if frozen/jailed
+    SKIP_TURN = "SKIP_TURN"
 
 
 @dataclass(frozen=True)
 class AvailableActions:
-    # what UI should render (and what it should call)
+    """
+    What the UI should show as buttons + useful context.
+    Board computes these using mostly contract reads.
+    """
     actions: list[ActionType]
     landed_cell: Optional[Cell] = None
-    # if relevant:
-    property_asset_id: Optional[str] = None
+    property_id: Optional[str] = None
+
+    # "truth" rendered from chain reads:
+    owner: Optional[str] = None
+    level: Optional[int] = None
+    player_balance: Optional[int] = None
+    asset_price: Optional[int] = None
+    property_price: Optional[int] = None
+
     reason: Optional[str] = None
 
 
+# =========================
+# External dependencies (interfaces only)
+# =========================
+
+class PlayerView(Protocol):
+    """
+    Minimal interface Board expects from your Player class/module.
+    Board does NOT define Player; it only needs these fields.
+    """
+    player_id: str            # can be wallet address for now
+    position: int
+    jailed_turns: int
+    frozen_turns: int
+
+
+class GameReader(Protocol):
+    """
+    READS from GameInstance (contract) to render truth.
+    Backed by web3.py later.
+    """
+    def get_asset_price(self, asset_id: str) -> int: ...
+    def get_property_price(self, property_id: str) -> int: ...
+    def owner_of(self, property_id: str) -> Optional[str]: ...
+    def level_of(self, property_id: str) -> int: ...
+    def balance_of(self, player_id: str) -> int: ...
+
+
+class TxRouter(Protocol):
+    """
+    Routes UI clicks to Transaction layer (which sends contract txs).
+    Board does NOT implement tx logic; it just calls these.
+    Returns tx hash string (or any identifier you choose).
+    """
+    def buy_property(self, property_id: str, player_id: str) -> str: ...
+    def pay_rent(self, property_id: str, player_id: str) -> str: ...
+    def upgrade_property(self, property_id: str, player_id: str) -> str: ...
+
+
+# =========================
+# BoardGame (Board-only)
+# =========================
+
 class BoardGame:
     """
-    Pure Web2 game orchestrator (no contracts).
-    Responsibilities:
-      - turn order
-      - dice roll
-      - movement + landing
-      - determine which UI actions are available
+    Off-chain responsibilities:
+      • Builds board layout (cells: start/jail/bug/server down/properties).
+      • Maintains turn order, dice, movement, “you landed here”.
+      • Determines which action buttons should be presented.
+
+    Contract usage:
+      • Mostly reads from GameReader to render truth:
+          - getAssetPrice(assetId) / getPropertyPrice(propertyId)
+          - ownerOf(propertyId), levelOf(propertyId)
+          - balanceOf(player)
+      • Triggers txs indirectly through TxRouter:
+          - “Buy”, “Pay rent”, “Upgrade” route to TxRouter.
     """
 
-    def __init__(self, players: list[Player], seed: Optional[int] = None):
+    def __init__(
+        self,
+        players: Sequence[PlayerView],
+        game_reader: GameReader,
+        tx_router: TxRouter,
+        seed: Optional[int] = None
+    ):
         if len(players) < 2:
-            raise ValueError("Need at least 2 players for a game.")
+            raise ValueError("Need at least 2 players.")
+
+        self.players: list[PlayerView] = list(players)
+        self.game: GameReader = game_reader
+        self.tx: TxRouter = tx_router
 
         self.rng = random.Random(seed)
-        self.players: list[Player] = players
-        self.current_player_idx: int = 0
 
+        self.current_player_idx: int = 0
         self.cells: list[Cell] = []
         self._initialize_board()
 
-        # Turn state
+        # turn state
         self.has_rolled_this_turn: bool = False
-        self.last_roll: Optional[int] = None  # 1..6 (prototype)
+        self.last_roll: Optional[int] = None
         self.last_landed_cell: Optional[Cell] = None
 
-        # Prototype ownership (off-chain)
-        # propertyId is asset.id (e.g., "BTC2") for simplicity
-        self.owner_of: dict[str, str] = {}  # asset_id -> player_id
-
-    # ---------- Board setup ----------
+    # ---------- Board init ----------
 
     def _create_assets(self) -> dict[str, Asset]:
         return {
@@ -165,30 +226,34 @@ class BoardGame:
         add(CellType.CHANCE)       # chance #4
         add(CellType.GO_TO_JAIL)   # go to jail
 
-    # ---------- Turn helpers ----------
+    # ---------- Helpers ----------
 
     @property
-    def current_player(self) -> Player:
+    def size(self) -> int:
+        return len(self.cells)
+
+    @property
+    def current_player(self) -> PlayerView:
         return self.players[self.current_player_idx]
 
     def get_cell(self, position: int) -> Cell:
         return self.cells[position % len(self.cells)]
 
-    # ---------- Core gameplay (no contracts) ----------
+    # ---------- Dice + Movement ----------
 
     def roll_dice(self) -> int:
         """
-        Rolls a 1d6 dice for movement (prototype).
-        Enforces: can roll once per turn and cannot roll if frozen/jailed.
+        1d6 dice for movement (prototype).
+        Dice used ONLY for movement (as you specified).
         """
         p = self.current_player
 
         if p.frozen_turns > 0:
-            raise RuntimeError("Player is frozen (SERVER_DOWN) and must skip turn.")
+            raise RuntimeError("Frozen (SERVER_DOWN): must skip turn.")
         if p.jailed_turns > 0:
-            raise RuntimeError("Player is jailed and must skip turn.")
+            raise RuntimeError("Jailed: must skip turn.")
         if self.has_rolled_this_turn:
-            raise RuntimeError("Already rolled dice this turn.")
+            raise RuntimeError("Already rolled this turn.")
 
         roll = self.rng.randint(1, 6)
         self.has_rolled_this_turn = True
@@ -197,24 +262,21 @@ class BoardGame:
 
     def move_current_player(self) -> Cell:
         """
-        Applies movement based on last roll.
-        Returns landed cell. Must roll before moving.
+        Moves current player by last_roll and applies immediate cell effects.
         """
         if not self.has_rolled_this_turn or self.last_roll is None:
             raise RuntimeError("Roll dice before moving.")
 
         p = self.current_player
         p.position = (p.position + self.last_roll) % len(self.cells)
-
         landed = self.get_cell(p.position)
         self.last_landed_cell = landed
 
-        # Apply immediate cell effects that change state (still Web2)
+        # Apply off-chain immediate effects (still board logic)
         self._apply_instant_cell_effects(p, landed)
-
         return self.last_landed_cell
 
-    def _apply_instant_cell_effects(self, p: Player, cell: Cell) -> None:
+    def _apply_instant_cell_effects(self, p: PlayerView, cell: Cell) -> None:
         # BUG or GO_TO_JAIL sends to jail
         if cell.type in (CellType.BUG, CellType.GO_TO_JAIL):
             self._send_to_jail(p)
@@ -223,21 +285,22 @@ class BoardGame:
         if cell.type == CellType.SERVER_DOWN:
             p.frozen_turns = max(p.frozen_turns, 1)
 
-    def _send_to_jail(self, p: Player) -> None:
+    def _send_to_jail(self, p: PlayerView) -> None:
         jail_idx = next(i for i, c in enumerate(self.cells) if c.type == CellType.JAIL)
         p.position = jail_idx
         p.jailed_turns = max(p.jailed_turns, 1)
         self.last_landed_cell = self.get_cell(p.position)
 
-    # ---------- UI action computation ----------
+    # ---------- UI action computation (with contract reads) ----------
 
     def get_available_actions(self) -> AvailableActions:
         """
-        This is what your website uses to decide which buttons to show.
+        UI uses this to decide which buttons to show.
+        Uses GameReader reads to render truth and determine relevant tx actions.
         """
         p = self.current_player
 
-        # If frozen/jailed: only skip/end turn
+        # frozen/jailed => only SKIP
         if p.frozen_turns > 0:
             return AvailableActions(
                 actions=[ActionType.SKIP_TURN],
@@ -251,79 +314,109 @@ class BoardGame:
                 reason="IN_JAIL"
             )
 
-        # If haven't rolled yet: show roll dice
+        # not rolled => ROLL
         if not self.has_rolled_this_turn:
             return AvailableActions(actions=[ActionType.ROLL_DICE])
 
-        # If rolled but not moved: you likely want UI to call move
+        # rolled but not moved (depends on how your UI is wired)
         if self.last_landed_cell is None:
-            # You can model MOVE as an action, but simplest: after roll, call move.
-            return AvailableActions(actions=[ActionType.END_TURN], reason="Call move_current_player() after roll")
+            return AvailableActions(
+                actions=[ActionType.END_TURN],
+                reason="Call move_current_player() after roll"
+            )
 
-        # After landing, show contextual actions
         cell = self.last_landed_cell
 
         if cell.type == CellType.CHANCE:
-            return AvailableActions(actions=[ActionType.DRAW_CHANCE, ActionType.END_TURN], landed_cell=cell)
+            return AvailableActions(
+                actions=[ActionType.DRAW_CHANCE, ActionType.END_TURN],
+                landed_cell=cell
+            )
 
         if cell.type == CellType.PROPERTY and cell.asset is not None:
-            asset_id = cell.asset.id
-            owner = self.owner_of.get(asset_id)
+            prop_id = cell.asset.id
+
+            owner = self.game.owner_of(prop_id)
+            level = self.game.level_of(prop_id)
+            bal = self.game.balance_of(p.player_id)
+
+            # pricing reads (useful for UI panels)
+            asset_price = self.game.get_asset_price(cell.asset.id)
+            prop_price = self.game.get_property_price(prop_id)
 
             if owner is None:
                 return AvailableActions(
                     actions=[ActionType.BUY_PROPERTY, ActionType.END_TURN],
                     landed_cell=cell,
-                    property_asset_id=asset_id
+                    property_id=prop_id,
+                    owner=owner,
+                    level=level,
+                    player_balance=bal,
+                    asset_price=asset_price,
+                    property_price=prop_price
                 )
-            elif owner != p.player_id:
+
+            if owner.lower() != p.player_id.lower():
                 return AvailableActions(
                     actions=[ActionType.PAY_RENT, ActionType.END_TURN],
                     landed_cell=cell,
-                    property_asset_id=asset_id
+                    property_id=prop_id,
+                    owner=owner,
+                    level=level,
+                    player_balance=bal,
+                    asset_price=asset_price,
+                    property_price=prop_price
                 )
 
-        # Default: can end turn
+            # owned by the player => allow UPGRADE
+            return AvailableActions(
+                actions=[ActionType.UPGRADE, ActionType.END_TURN],
+                landed_cell=cell,
+                property_id=prop_id,
+                owner=owner,
+                level=level,
+                player_balance=bal,
+                asset_price=asset_price,
+                property_price=prop_price
+            )
+
         return AvailableActions(actions=[ActionType.END_TURN], landed_cell=cell)
 
-    # ---------- Minimal transaction stubs (still Web2) ----------
+    # ---------- Button click routing (Board -> TxRouter) ----------
 
-    def buy_property(self, asset_id: str) -> None:
+    def click_buy(self, property_id: str) -> str:
         """
-        Prototype: sets owner. No money logic yet.
+        UI 'Buy' button -> routes to Transaction layer -> contract buyProperty(propertyId)
         """
-        p = self.current_player
-        if asset_id in self.owner_of:
-            raise RuntimeError("Already owned.")
-        self.owner_of[asset_id] = p.player_id
+        return self.tx.buy_property(property_id=property_id, player_id=self.current_player.player_id)
 
-    def pay_rent(self, asset_id: str) -> None:
+    def click_pay_rent(self, property_id: str) -> str:
         """
-        Prototype placeholder: no money yet.
+        UI 'Pay rent' button -> routes to Transaction layer -> contract payRent(propertyId)
         """
-        owner = self.owner_of.get(asset_id)
-        if owner is None:
-            raise RuntimeError("Property not owned.")
-        if owner == self.current_player.player_id:
-            raise RuntimeError("Cannot pay rent to yourself.")
-        # money transfer will be added later
+        return self.tx.pay_rent(property_id=property_id, player_id=self.current_player.player_id)
+
+    def click_upgrade(self, property_id: str) -> str:
+        """
+        UI 'Upgrade' button -> routes to Transaction layer -> contract upgradeProperty(propertyId)
+        """
+        return self.tx.upgrade_property(property_id=property_id, player_id=self.current_player.player_id)
+
+    # ---------- Turn progression ----------
 
     def end_turn(self) -> None:
         """
-        Advances to next player, handles jail/freeze counters, resets turn state.
+        Advances to next player, decrements jail/freeze counters, resets turn state.
         """
         p = self.current_player
 
-        # decrement statuses (end of player's turn)
         if p.frozen_turns > 0:
             p.frozen_turns -= 1
         if p.jailed_turns > 0:
             p.jailed_turns -= 1
 
-        # reset turn state
         self.has_rolled_this_turn = False
         self.last_roll = None
         self.last_landed_cell = None
 
-        # next player
         self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
