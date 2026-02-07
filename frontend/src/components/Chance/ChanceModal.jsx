@@ -56,7 +56,7 @@ export default function ChanceModal({ open, text, delta, onClose }) {
               )}
 
               <div className="chance-hint">
-                Закрой карточку, чтобы продолжить ход.
+                Close the chance card to continue the game.
               </div>
             </div>
           </div>

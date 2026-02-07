@@ -110,37 +110,37 @@ const Board = () => {
   const dice = gameState ? gameState.dice : [1, 1];
 
   // ===== CHANCE: ловим новые News сообщения и показываем карточку =====
-  useEffect(() => {
-    if (!gameState) return;
+  // ===== CHANCE: ловим новые NEWS сообщения и показываем карточку =====
+useEffect(() => {
+  if (!gameState) return;
 
-    const prevCount = lastMsgCountRef.current;
-    const nextCount = messages.length;
+  const prevCount = lastMsgCountRef.current;
+  const nextCount = messages.length;
 
-    if (nextCount > prevCount) {
-      const newSlice = messages.slice(prevCount);
-
-      const newsMsg = [...newSlice].reverse().find((m) => m.user === "News");
-
-      if (newsMsg) {
-        let parsedDelta = null;
-        const match = newsMsg.text.match(/([+-]?\d+)\s*FC/i);
-        if (match) parsedDelta = Number(match[1]);
-
-        const fingerprint = `${newsMsg.user}:${newsMsg.text}`;
-        if (lastShownNewsRef.current !== fingerprint) {
-          lastShownNewsRef.current = fingerprint;
-
-          setChanceCard({
-            text: newsMsg.text,
-            delta: parsedDelta,
-            key: Date.now(),
-          });
-        }
-      }
-    }
-
+  // При первом подключении просто синхронизируем счётчик,
+  // чтобы не триггериться на "Welcome..."
+  if (prevCount === 0 && nextCount > 0) {
     lastMsgCountRef.current = nextCount;
-  }, [messages, gameState]);
+    return;
+  }
+
+  if (nextCount > prevCount) {
+    const newSlice = messages.slice(prevCount);
+
+    // Берем последнее news-сообщение среди новых
+    const newsMsg = [...newSlice].reverse().find((m) => m.type === "news");
+
+    if (newsMsg) {
+      setChanceCard({
+        text: newsMsg.text,
+        delta: typeof newsMsg.delta === "number" ? newsMsg.delta : null,
+        key: Date.now(),
+      });
+    }
+  }
+
+  lastMsgCountRef.current = nextCount;
+}, [messages, gameState]);
 
   const incomingOffersForActive = useMemo(
     () => tradeOffers.filter((o) => o.to === activePlayer),
