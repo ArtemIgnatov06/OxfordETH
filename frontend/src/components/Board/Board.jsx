@@ -26,6 +26,8 @@ const apiCall = async (endpoint, method = 'GET', body = null) => {
     return null;
   }
 };
+//chat
+
 
 const PLAYER_COLORS = ['#22c55e', '#3b82f6', '#a855f7', '#f97316'];
 
@@ -55,6 +57,19 @@ const Board = () => {
   const base = import.meta.env.BASE_URL;
   const getTokenIconSrc = (tile) => `${base}images/${tile.name}.png`;
 
+  const handleSendChat = async () => {
+    if (!chatMsg.trim()) return; 
+    
+    const textToSend = chatMsg;
+    setChatMsg(''); 
+    
+    const newState = await apiCall('/chat', 'POST', { text: textToSend });
+    
+    if (newState) {
+      setGameState(newState);
+    }
+  };
+  
   // === DATA FETCHING ===
   
   // Функция обновления стейта
@@ -378,7 +393,7 @@ const Board = () => {
                 </button>
               </div>
 
-              <div className="chat-box">
+<div className="chat-box">
                 <div
                   className="chat-messages"
                   ref={chatListRef}
@@ -390,15 +405,37 @@ const Board = () => {
                   }}
                 >
                   {messages.map((m, i) => (
-                    <div key={i}><strong>{m.user}:</strong> {m.text}</div>
+                    <div key={i} className="chat-msg-row">
+                      <span 
+                        className="chat-user"
+                        style={{ 
+                          // Красим никнейм в цвет игрока, если это P1, P2...
+                          color: m.user.startsWith('P') && !isNaN(parseInt(m.user.slice(1))) 
+                            ? PLAYER_COLORS[parseInt(m.user.slice(1)) - 1] 
+                            : '#888'
+                        }}
+                      >
+                        {m.user}:
+                      </span>
+                      <span className="chat-text">{m.text}</span>
+                    </div>
                   ))}
                 </div>
-                {/* Чат только для просмотра логов системы пока, ввод можно привязать к API позже */}
-                <input
-                  className="chat-input"
-                  placeholder="System logs only..."
-                  disabled
-                />
+
+                <div className="chat-input-wrapper">
+                   <input
+                    className="chat-input"
+                    // Пишем от имени того, чей сейчас ход
+                    placeholder={`Say as Player ${activePlayer + 1}...`}
+                    value={chatMsg}
+                    onChange={(e) => setChatMsg(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSendChat();
+                    }}
+                    // Убираем disabled
+                  />
+                  <button className="chat-send-btn" onClick={handleSendChat}>➤</button>
+                </div>
               </div>
             </div>
           </div>
