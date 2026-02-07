@@ -41,6 +41,10 @@ class GameState:
     dice: List[int] = field(default_factory=lambda: [1, 1])
     player_pos: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
     active_player: int = 0
+    eliminated: List[bool] = field(default_factory=lambda: [False, False, False, False])
+    game_over: bool = False
+    winner: Optional[int] = None
+
 
     # tileId -> ownerIndex
     ownership: Dict[int, int] = field(default_factory=dict)
@@ -66,7 +70,48 @@ class GameState:
         self.trade_offers = []
         self.messages = [Message("System", "Welcome to FlarePoly Testnet!")]
 
+        self.eliminated = [False] * self.players_count
+        self.game_over = False
+        self.winner = None
+
     # ----- helpers -----
+
+    def _alive_players(self) -> List[int]:
+        return [i for i in range(self.players_count) if not self.eliminated[i]]
+
+    def _advance_to_next_alive(self):
+        """Move active_player forward until it points at a non-eliminated player.
+        Assumes there is at least 1 alive player.
+        """
+        for _ in range(self.players_count):
+            if not self.eliminated[self.active_player]:
+                return
+            self.active_player = (self.active_player + 1) % self.players_count
+
+    def _check_bankruptcy_and_win(self):
+        """Eliminate players with <= 0 FC and declare winner if only one remains."""
+        # Eliminate anyone who is broke
+        for i in range(self.players_count):
+            if not self.eliminated[i] and self.balances[i] <= 0:
+                self.eliminated[i] = True
+                self.add_message("System", f"P{i+1} is BANKRUPT and out of the game")
+
+        alive = self._alive_players()
+
+        if len(alive) == 1:
+            self.game_over = True
+            self.winner = alive[0]
+            self.add_message("System", f"P{self.winner+1} wins! 🎉")
+            # Unblock any pending UI prompts/offers so frontend doesn’t get stuck
+            self.buy_prompt = None
+            self.trade_offers = []
+            return
+
+        # If current active got eliminated, move to next alive
+        if self.eliminated[self.active_player] and len(alive) > 0:
+            self._advance_to_next_alive()
+
+
     def add_message(self, user: str, text: str):
         self.messages.append(Message(user, text))
 
@@ -74,9 +119,16 @@ class GameState:
         return [o for o in self.trade_offers if o.to_player == self.active_player]
 
     def next_player(self):
+        if self.game_over:
+            return
         self.active_player = (self.active_player + 1) % self.players_count
+        self._advance_to_next_alive()
 
     def _guard_turn_not_blocked(self):
+        if self.game_over:
+            raise ValueError("Game over")
+        if self.eliminated[self.active_player]:
+            raise ValueError("Active player eliminated")
         if self.buy_prompt is not None:
             raise ValueError("Blocked: buyPrompt pending")
         if len(self.incoming_offers_for_active()) > 0:
@@ -103,6 +155,8 @@ class GameState:
 
     # ----- actions -----
     def roll(self):
+        self._advance_to_next_alive()
+        self._guard_turn_not_blocked()
         self._guard_turn_not_blocked()
 
         d1, d2 = self._roll_dice()
@@ -233,16 +287,15 @@ class GameState:
             raise ValueError(f"Deal failed: P{buyer+1} has not enough FC")
 
         # transfer FC
+        # transfer FC
         self.balances[buyer] -= offer.price_fc
         self.balances[seller] += offer.price_fc
 
-        # transfer tile ownership
-        self.ownership[offer.tile_id] = buyer
-
-        self.add_message("System", f"Deal: {tile.name} P{seller+1} → P{buyer+1} for {offer.price_fc} FC")
-
-        self._remove_offer(offer_id)
-        self.next_player()
+        # IMPORTANT: evaluate bankruptcy/win immediately after balance change
+        self._check_bankruptcy_and_win()
+        if self.game_over:
+            self._remove_offer(offer_id)
+            return
 
     def decline_offer(self, offer_id: str):
         offer = self._find_offer(offer_id)
@@ -267,4 +320,9 @@ class GameState:
             "balances": self.balances,
             "tradeOffers": [o.to_front() for o in self.trade_offers],
             "messages": [{"user": m.user, "text": m.text} for m in self.messages],
+
+            "eliminated": self.eliminated,
+            "gameOver": self.game_over,
+            "winner": self.winner,
         }
+
