@@ -257,11 +257,35 @@ class GameState:
             return
 
         tile = TILES_BY_ID[prompt_tile]
-        # В твоём фронте покупка за $ (не FC) — просто фиксируем ownership
+
+        # ✅ списываем FC за покупку
+        if tile.price is None:
+            raise ValueError("Tile has no price")
+
+        # price может быть float (0.12 / 0.00001), balances — int FC
+        # делаем минимальную цену 1 FC, иначе мелкие цены будут 0
+        cost_fc = int(tile.price)
+        if tile.price > 0 and cost_fc <= 0:
+            cost_fc = 1
+
+        if self.balances[p] < cost_fc:
+            # недостаточно средств: закрываем buyPrompt и идём дальше
+            self.add_message("System", f"P{p+1} can't buy {tile.name}: not enough FC ({cost_fc} FC needed)")
+            self.buy_prompt = None
+            self.next_player()
+            return
+
+        self.balances[p] -= cost_fc
+        self._check_bankruptcy_and_win()
+        if self.game_over:
+            self.buy_prompt = None
+            return
+
         self.ownership[prompt_tile] = p
-        self.add_message("System", f"P{p+1} bought {tile.name} for ${tile.price}")
+        self.add_message("System", f"P{p+1} bought {tile.name} for {cost_fc} FC")
         self.buy_prompt = None
         self.next_player()
+
 
     def skip_buy(self):
         if self.buy_prompt is None:

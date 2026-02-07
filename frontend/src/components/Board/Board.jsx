@@ -53,6 +53,22 @@ const Board = () => {
 
   const base = import.meta.env.BASE_URL;
   const getTokenIconSrc = (tile) => `${base}images/${tile.name}.png`;
+  const flareIconSrc = `${base}images/FLARE.png`;
+
+  const renderFlarePrice = (value) => {
+    if (value == null) return null;
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <img
+          src={flareIconSrc}
+          alt="FC"
+          style={{ width: 14, height: 14, objectFit: 'contain', filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.35))' }}
+          draggable="false"
+        />
+        <span>{value}</span>
+      </span>
+    );
+  };
 
   // ===== CHANCE CARD UI =====
   const [chanceCard, setChanceCard] = useState(null); // { text, delta, key }
@@ -151,7 +167,6 @@ const Board = () => {
     const now = eliminated || [];
     for (let i = 0; i < now.length; i++) {
       if (!prev[i] && now[i]) {
-        // новый вылет
         setBankruptModal({ playerIndex: i });
         break;
       }
@@ -161,7 +176,6 @@ const Board = () => {
     // 2) окончание игры
     if (gameOver) {
       setWinnerModalOpen(true);
-      // чтобы UI не завис на трейдах/бай/шансах
       setTradeOpen(false);
       setChanceCard(null);
     }
@@ -254,7 +268,6 @@ const Board = () => {
 
   // === ACTIONS ===
   const handleRoll = async () => {
-    // ЧИТАЕМ БЛОКИРОВКИ ИЗ БЕКЕНДА
     if (gameOver) return;
     if (activeEliminated) return;
     if (isRolling || buyPrompt || tradeOpen || incomingOffersForActive.length > 0 || !!chanceCard) return;
@@ -552,12 +565,20 @@ const Board = () => {
                         {tile.name}
                       </div>
                       {ownerIdx != null && <div className="owner-badge">P{ownerIdx + 1}</div>}
-                      {tile.price != null && <div className="tile-price">${tile.price}</div>}
+                      {tile.price != null && (
+                        <div className="tile-price">
+                          {renderFlarePrice(tile.price)} <span style={{ opacity: 0.8 }}>FC</span>
+                        </div>
+                      )}
                     </>
                   ) : (
                     <>
                       <div className="tile-name">{tile.name}</div>
-                      {tile.price != null && <div className="tile-price">${tile.price}</div>}
+                      {tile.price != null && (
+                        <div className="tile-price">
+                          {renderFlarePrice(tile.price)} <span style={{ opacity: 0.8 }}>FC</span>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
@@ -609,7 +630,7 @@ const Board = () => {
                 )}
 
                 <div className="wallet-chip wallet-chip-coins">
-                  <img className="flare-coin-icon" src={`${base}images/FLARE.png`} alt="FC" />
+                  <img className="flare-coin-icon" src={flareIconSrc} alt="FC" />
                   {bal} FC
                 </div>
               </div>
@@ -689,7 +710,10 @@ const Board = () => {
                   </div>
                 </div>
                 <div className="buy-price">
-                  Price: <span className="buy-price-num">${tile.price}</span>
+                  Price:{' '}
+                  <span className="buy-price-num">
+                    {renderFlarePrice(tile.price)} <span style={{ opacity: 0.8 }}>FC</span>
+                  </span>
                 </div>
               </div>
 
