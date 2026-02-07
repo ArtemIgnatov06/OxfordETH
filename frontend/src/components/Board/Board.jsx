@@ -4,7 +4,7 @@ import './Board.css';
 import { TILES, FAMILY_COLORS } from './BoardData';
 import ChanceModal from "../Chance/ChanceModal";
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'; // Адрес вашего бекенда
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 // Вспомогательная функция для API запросов
 const apiCall = async (endpoint, method = 'GET', body = null) => {
@@ -39,7 +39,7 @@ const Board = () => {
   // === SERVER STATE ===
   const [gameState, setGameState] = useState(null);
 
-  // Локальные позиции для анимации (чтобы фишки двигались плавно)
+  // Локальные позиции для анимации
   const [visualPlayerPos, setVisualPlayerPos] = useState([0, 0, 0, 0]);
 
   // Модалка трейдов
@@ -57,8 +57,12 @@ const Board = () => {
   // ===== CHANCE CARD UI =====
   const [chanceCard, setChanceCard] = useState(null); // { text, delta, key }
   const lastMsgCountRef = useRef(0);
-  const lastShownNewsRef = useRef(""); // защита от дублей при polling
   const closeChance = () => setChanceCard(null);
+
+  // ===== GAME OVER / BANKRUPT UI =====
+  const [winnerModalOpen, setWinnerModalOpen] = useState(false);
+  const [bankruptModal, setBankruptModal] = useState(null); // { playerIndex }
+  const lastEliminatedRef = useRef([false, false, false, false]);
 
   const handleSendChat = async () => {
     if (!chatMsg.trim()) return;
@@ -67,31 +71,23 @@ const Board = () => {
     setChatMsg('');
 
     const newState = await apiCall('/chat', 'POST', { text: textToSend });
-
-    if (newState) {
-      setGameState(newState);
-    }
+    if (newState) setGameState(newState);
   };
 
   // === DATA FETCHING ===
   const fetchState = async () => {
     if (isRolling) return;
-
     try {
       const res = await fetch(`${API_URL}/state`);
       const data = await res.json();
-
       setGameState(data);
-
-      if (!isRolling) {
-        setVisualPlayerPos(data.playerPos);
-      }
+      if (!isRolling) setVisualPlayerPos(data.playerPos);
     } catch (e) {
       console.error("Error fetching state:", e);
     }
   };
 
-  // Polling: Опрашиваем сервер каждую секунду
+  // Polling
   useEffect(() => {
     fetchState();
     const interval = setInterval(fetchState, 1000);
@@ -103,44 +99,73 @@ const Board = () => {
   const playersCount = gameState ? gameState.playerPos.length : 4;
   const activePlayer = gameState ? gameState.activePlayer : 0;
   const balances = gameState ? gameState.balances : [0, 0, 0, 0];
-  const ownership = gameState ? gameState.ownership : {}; // {"1": 0, "5": 2}
+  const ownership = gameState ? gameState.ownership : {};
   const messages = gameState ? gameState.messages : [];
   const buyPrompt = gameState ? gameState.buyPrompt : null;
   const tradeOffers = gameState ? gameState.tradeOffers : [];
   const dice = gameState ? gameState.dice : [1, 1];
 
-  // ===== CHANCE: ловим новые News сообщения и показываем карточку =====
+  // NEW from backend:
+  const eliminated = gameState ? gameState.eliminated : [false, false, false, false];
+  const gameOver = gameState ? gameState.gameOver : false;
+  const winner = gameState ? gameState.winner : null;
+  const skipTurns = gameState ? gameState.skipTurns : [0, 0, 0, 0];
+
+  const activeEliminated = !!eliminated?.[activePlayer];
+
   // ===== CHANCE: ловим новые NEWS сообщения и показываем карточку =====
-useEffect(() => {
-  if (!gameState) return;
+  useEffect(() => {
+    if (!gameState) return;
 
-  const prevCount = lastMsgCountRef.current;
-  const nextCount = messages.length;
+    const prevCount = lastMsgCountRef.current;
+    const nextCount = messages.length;
 
-  // При первом подключении просто синхронизируем счётчик,
-  // чтобы не триггериться на "Welcome..."
-  if (prevCount === 0 && nextCount > 0) {
-    lastMsgCountRef.current = nextCount;
-    return;
-  }
-
-  if (nextCount > prevCount) {
-    const newSlice = messages.slice(prevCount);
-
-    // Берем последнее news-сообщение среди новых
-    const newsMsg = [...newSlice].reverse().find((m) => m.type === "news");
-
-    if (newsMsg) {
-      setChanceCard({
-        text: newsMsg.text,
-        delta: typeof newsMsg.delta === "number" ? newsMsg.delta : null,
-        key: Date.now(),
-      });
+    // При первом подключении синхронизируемся, чтобы не открыть модалки на "Welcome..."
+    if (prevCount === 0 && nextCount > 0) {
+      lastMsgCountRef.current = nextCount;
+      return;
     }
-  }
 
-  lastMsgCountRef.current = nextCount;
-}, [messages, gameState]);
+    if (nextCount > prevCount) {
+      const newSlice = messages.slice(prevCount);
+      const newsMsg = [...newSlice].reverse().find((m) => m.type === "news");
+
+      if (newsMsg) {
+        setChanceCard({
+          text: newsMsg.text,
+          delta: typeof newsMsg.delta === "number" ? newsMsg.delta : null,
+          key: Date.now(),
+        });
+      }
+    }
+
+    lastMsgCountRef.current = nextCount;
+  }, [messages, gameState]);
+
+  // ===== BANKRUPT / GAME OVER реакция (из backend eliminated/gameOver/winner) =====
+  useEffect(() => {
+    if (!gameState) return;
+
+    // 1) банкрот конкретного игрока
+    const prev = lastEliminatedRef.current || [];
+    const now = eliminated || [];
+    for (let i = 0; i < now.length; i++) {
+      if (!prev[i] && now[i]) {
+        // новый вылет
+        setBankruptModal({ playerIndex: i });
+        break;
+      }
+    }
+    lastEliminatedRef.current = [...now];
+
+    // 2) окончание игры
+    if (gameOver) {
+      setWinnerModalOpen(true);
+      // чтобы UI не завис на трейдах/бай/шансах
+      setTradeOpen(false);
+      setChanceCard(null);
+    }
+  }, [gameState, eliminated, gameOver]);
 
   const incomingOffersForActive = useMemo(
     () => tradeOffers.filter((o) => o.to === activePlayer),
@@ -229,10 +254,12 @@ useEffect(() => {
 
   // === ACTIONS ===
   const handleRoll = async () => {
+    // ЧИТАЕМ БЛОКИРОВКИ ИЗ БЕКЕНДА
+    if (gameOver) return;
+    if (activeEliminated) return;
     if (isRolling || buyPrompt || tradeOpen || incomingOffersForActive.length > 0 || !!chanceCard) return;
 
     setIsRolling(true);
-
     const newState = await apiCall('/roll', 'POST');
 
     if (newState) {
@@ -244,10 +271,7 @@ useEffect(() => {
       if (steps < 0) steps += TILES.length;
 
       const stepsToAnimate = steps === 0 ? 0 : steps;
-
-      if (stepsToAnimate > 0) {
-        await animateMove(moverIdx, oldPos, stepsToAnimate);
-      }
+      if (stepsToAnimate > 0) await animateMove(moverIdx, oldPos, stepsToAnimate);
 
       setGameState(newState);
     }
@@ -256,12 +280,13 @@ useEffect(() => {
   };
 
   const handleBuy = async () => {
-    if (!buyPrompt) return;
+    if (!buyPrompt || gameOver || activeEliminated) return;
     const newState = await apiCall('/buy', 'POST', { tileId: buyPrompt.tileId });
     if (newState) setGameState(newState);
   };
 
   const handleSkipBuy = async () => {
+    if (gameOver || activeEliminated) return;
     const newState = await apiCall('/skip_buy', 'POST');
     if (newState) setGameState(newState);
   };
@@ -272,13 +297,16 @@ useEffect(() => {
       setGameState(newState);
       setVisualPlayerPos([0, 0, 0, 0]);
       setChanceCard(null);
+      setWinnerModalOpen(false);
+      setBankruptModal(null);
       lastMsgCountRef.current = 0;
-      lastShownNewsRef.current = "";
+      lastEliminatedRef.current = [false, false, false, false];
     }
   };
 
   // --- Trade Logic ---
   const openTradeSell = () => {
+    if (gameOver || activeEliminated) return;
     const tileId = myOwnedTiles[0] ?? null;
     const target = (activePlayer + 1) % playersCount;
     setTradeForm({ mode: 'sell', tileId, target, priceFC: 500 });
@@ -286,6 +314,7 @@ useEffect(() => {
   };
 
   const openTradeBuy = () => {
+    if (gameOver || activeEliminated) return;
     const tileId = otherOwnedTiles[0] ?? null;
     const owner = tileId != null ? ownership[tileId] : null;
     setTradeForm({
@@ -330,19 +359,15 @@ useEffect(() => {
   };
 
   const createTradeOffer = async () => {
+    if (gameOver || activeEliminated) return;
+
     const priceFC = Math.max(0, Math.floor(Number(tradeForm.priceFC) || 0));
     const tileId = tradeForm.tileId != null ? Number(tradeForm.tileId) : null;
     const target = Number(tradeForm.target);
 
     if (tileId == null) return;
 
-    const body = {
-      type: tradeForm.mode,
-      to: target,
-      tileId: tileId,
-      priceFC: priceFC
-    };
-
+    const body = { type: tradeForm.mode, to: target, tileId, priceFC };
     const newState = await apiCall('/offers', 'POST', body);
     if (newState) {
       setGameState(newState);
@@ -351,11 +376,13 @@ useEffect(() => {
   };
 
   const acceptOffer = async (id) => {
+    if (gameOver || activeEliminated) return;
     const newState = await apiCall(`/offers/${id}/accept`, 'POST');
     if (newState) setGameState(newState);
   };
 
   const declineOffer = async (id) => {
+    if (gameOver || activeEliminated) return;
     const newState = await apiCall(`/offers/${id}/decline`, 'POST');
     if (newState) setGameState(newState);
   };
@@ -399,17 +426,31 @@ useEffect(() => {
                 <button
                   className="roll-btn"
                   onClick={handleRoll}
-                  disabled={isRolling || !!buyPrompt || tradeOpen || incomingOffersForActive.length > 0 || !!chanceCard}
+                  disabled={
+                    gameOver ||
+                    activeEliminated ||
+                    isRolling ||
+                    !!buyPrompt ||
+                    tradeOpen ||
+                    incomingOffersForActive.length > 0 ||
+                    !!chanceCard
+                  }
                 >
-                  {isRolling
-                    ? 'MOVING...'
-                    : buyPrompt || tradeOpen
-                      ? 'WAIT...'
-                      : incomingOffersForActive.length > 0
-                        ? 'OFFERS...'
-                        : !!chanceCard
-                          ? 'CHANCE...'
-                          : `P${activePlayer + 1} ROLL`}
+                  {gameOver
+                    ? 'GAME OVER'
+                    : activeEliminated
+                      ? `P${activePlayer + 1} OUT`
+                      : isRolling
+                        ? 'MOVING...'
+                        : buyPrompt || tradeOpen
+                          ? 'WAIT...'
+                          : incomingOffersForActive.length > 0
+                            ? 'OFFERS...'
+                            : !!chanceCard
+                              ? 'CHANCE...'
+                              : skipTurns?.[activePlayer] > 0
+                                ? `PRISON (${skipTurns[activePlayer]})`
+                                : `P${activePlayer + 1} ROLL`}
                 </button>
               </div>
 
@@ -431,7 +472,9 @@ useEffect(() => {
                         style={{
                           color: m.user.startsWith('P') && !isNaN(parseInt(m.user.slice(1)))
                             ? PLAYER_COLORS[parseInt(m.user.slice(1)) - 1]
-                            : '#888'
+                            : m.user === "News"
+                              ? "#a5b4fc"
+                              : "#888"
                         }}
                       >
                         {m.user}:
@@ -530,29 +573,65 @@ useEffect(() => {
       <aside className="wallets-panel">
         <div className="wallets-title">PLAYERS</div>
 
-        {gameState.balances.map((bal, idx) => (
-          <div key={idx} className={`wallet-card ${idx === activePlayer ? 'active' : ''}`}>
-            <div className="wallet-left">
-              <div className="player-dot" style={{ background: PLAYER_COLORS[idx] }} />
-              <div className="wallet-meta">
-                <div className="wallet-name">PLAYER {idx + 1}</div>
-                <div className="wallet-addr">0xWallet...{idx}</div>
-              </div>
-            </div>
+        {gameState.balances.map((bal, idx) => {
+          const isActive = idx === activePlayer;
+          const isOut = !!eliminated?.[idx];
+          const prisonSkips = skipTurns?.[idx] || 0;
+          const inPrison = prisonSkips > 0;
 
-            <div className="wallet-right">
-              <div className="wallet-chip">POS {visualPlayerPos[idx]}</div>
-              <div className="wallet-chip wallet-chip-coins">
-                <img className="flare-coin-icon" src={`${base}images/FLARE.png`} alt="FC" />
-                {bal} FC
+          return (
+            <div
+              key={idx}
+              className={`wallet-card ${isActive ? 'active' : ''}`}
+              style={{
+                opacity: isOut ? 0.45 : 1,
+                filter: isOut ? 'grayscale(0.8)' : 'none',
+              }}
+              title={isOut ? 'BANKRUPT' : ''}
+            >
+              <div className="wallet-left">
+                <div className="player-dot" style={{ background: PLAYER_COLORS[idx] }} />
+                <div className="wallet-meta">
+                  <div className="wallet-name">
+                    PLAYER {idx + 1} {isOut ? '— BANKRUPT' : ''}
+                  </div>
+                  <div className="wallet-addr">0xWallet...{idx}</div>
+                </div>
+              </div>
+
+              <div className="wallet-right">
+                <div className="wallet-chip">POS {visualPlayerPos[idx]}</div>
+
+                {inPrison && (
+                  <div className="wallet-chip" style={{ fontWeight: 900 }}>
+                    PRISON {prisonSkips}
+                  </div>
+                )}
+
+                <div className="wallet-chip wallet-chip-coins">
+                  <img className="flare-coin-icon" src={`${base}images/FLARE.png`} alt="FC" />
+                  {bal} FC
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         <div className="wallet-actions">
-          <button className="buy-btn secondary" onClick={openTradeSell} disabled={tradeOpen}>SELL STREET</button>
-          <button className="buy-btn secondary" onClick={openTradeBuy} disabled={tradeOpen}>BUY STREET</button>
+          <button
+            className="buy-btn secondary"
+            onClick={openTradeSell}
+            disabled={tradeOpen || gameOver || activeEliminated}
+          >
+            SELL STREET
+          </button>
+          <button
+            className="buy-btn secondary"
+            onClick={openTradeBuy}
+            disabled={tradeOpen || gameOver || activeEliminated}
+          >
+            BUY STREET
+          </button>
         </div>
 
         <div className="wallet-offers">
@@ -575,8 +654,8 @@ useEffect(() => {
                   <div className="offer-bottom">
                     <div className="offer-price">{o.priceFC} FC</div>
                     <div className="offer-actions">
-                      <button className="buy-btn secondary" onClick={() => declineOffer(o.id)}>DECLINE</button>
-                      <button className="buy-btn primary" onClick={() => acceptOffer(o.id)}>ACCEPT</button>
+                      <button className="buy-btn secondary" onClick={() => declineOffer(o.id)} disabled={gameOver || activeEliminated}>DECLINE</button>
+                      <button className="buy-btn primary" onClick={() => acceptOffer(o.id)} disabled={gameOver || activeEliminated}>ACCEPT</button>
                     </div>
                   </div>
                 </div>
@@ -736,6 +815,60 @@ useEffect(() => {
         delta={chanceCard?.delta}
         onClose={closeChance}
       />
+
+      {/* --- MODAL: BANKRUPT (конкретный игрок) --- */}
+      {bankruptModal && (
+        <div className="buy-modal-backdrop" onClick={() => setBankruptModal(null)}>
+          <div className="buy-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="buy-modal-header">
+              <div className="buy-modal-title">Game Over (Player)</div>
+              <button className="buy-modal-x" onClick={() => setBankruptModal(null)}>✕</button>
+            </div>
+            <div className="buy-modal-body">
+              <div style={{ color: '#e2e8f0', fontWeight: 900, fontSize: 14 }}>
+                P{bankruptModal.playerIndex + 1} is BANKRUPT 💀
+              </div>
+              <div style={{ marginTop: 8, color: '#94a3b8', fontSize: 12 }}>
+                Этот игрок вылетел из игры. Ходы продолжатся для остальных.
+              </div>
+            </div>
+            <div className="buy-modal-actions">
+              <button className="buy-btn primary" onClick={() => setBankruptModal(null)}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL: GAME OVER (остался один) --- */}
+      {winnerModalOpen && gameOver && (
+        <div className="buy-modal-backdrop" onClick={() => setWinnerModalOpen(false)}>
+          <div className="buy-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="buy-modal-header">
+              <div className="buy-modal-title">GAME OVER</div>
+              <button className="buy-modal-x" onClick={() => setWinnerModalOpen(false)}>✕</button>
+            </div>
+            <div className="buy-modal-body">
+              <div style={{ color: '#e2e8f0', fontWeight: 900, fontSize: 16 }}>
+                Winner: P{(winner ?? 0) + 1} 🎉
+              </div>
+              <div style={{ marginTop: 8, color: '#94a3b8', fontSize: 12 }}>
+                Игра окончена — в живых остался только один игрок.
+              </div>
+            </div>
+            <div className="buy-modal-actions">
+              <button className="buy-btn secondary" onClick={() => setWinnerModalOpen(false)}>
+                CLOSE
+              </button>
+              <button className="buy-btn primary" onClick={handleReset}>
+                NEW GAME
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

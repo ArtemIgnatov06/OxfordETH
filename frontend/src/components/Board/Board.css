@@ -632,3 +632,40 @@
 .chat-send-btn:hover {
   background: #2563eb;
 }
+
+
+/* WALLETS PANEL — wider */
+.wallets-panel {
+  width: 340px;          /* было 280px */
+  max-width: 360px;
+}
+
+/* чтобы правый блок не разъезжался */
+.wallet-right {
+  flex-wrap: wrap;       /* ✅ чипы переносятся на 2 строку */
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* чипы чуть компактнее */
+.wallet-chip {
+  padding: 5px 7px;      /* было 6px 8px */
+  font-size: 10.5px;     /* было 11px */
+  border-radius: 9px;    /* было 10px */
+  white-space: nowrap;   /* ✅ текст не ломается внутри чипа */
+}
+
+/* чтобы имя/адрес не толкали карточку */
+.wallet-left {
+  min-width: 0;          /* ✅ позволяет текста сжиматься */
+}
+.wallet-meta {
+  min-width: 0;
+}
+.wallet-name,
+.wallet-addr {
+  max-width: 170px;      /* подгони если надо */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
