@@ -47,8 +47,15 @@ class SignedOfferCreateBody(BaseModel):
 class SignedSettleBody(BaseModel):
     proof: ProofBody
     txHash: str
+    
+class SigProofModel(BaseModel):
+    address: str
+    message: str
+    signature: str
 
-
+class SignedChatBody(BaseModel):
+    proof: SigProofModel
+    text: str
 # ---------- ENDPOINTS ----------
 
 @app.get("/")
@@ -89,6 +96,12 @@ def connect_wallet(body: ConnectWalletBody):
 def reset():
     GAME.reset()
     return snapshot()
+
+@app.post("/chat")
+def chat(body: SignedChatBody):
+    GAME.chat(body.text, SigProof(**body.proof.model_dump()))
+    return snapshot()
+
 
 @app.post("/roll")
 def roll(body: SignedActionBody):

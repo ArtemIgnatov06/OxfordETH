@@ -6,7 +6,51 @@ import ChanceModal from "../Chance/ChanceModal";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-// Вспомогательная функция для API запросов
+// --- Metamask signing helpers ---
+const hasEthereum = () => typeof window !== 'undefined' && !!window.ethereum;
+
+const personalSign = async (message, address) => {
+  return window.ethereum.request({
+    method: 'personal_sign',
+    params: [message, address],
+  });
+};
+
+const getActionMessage = async (playerIndex, action, params = "") => {
+  const res = await fetch(
+    `${API_URL}/action_message?playerIndex=${playerIndex}&action=${encodeURIComponent(action)}&params=${encodeURIComponent(params)}`
+  );
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Failed to fetch action message: ${txt}`);
+  }
+  return res.json(); // { message }
+};
+
+// Build SigProof for ACTIVE player turn (backend requires active player to sign)
+const buildProofForActiveTurn = async (action, params = "") => {
+  if (!hasEthereum()) throw new Error("MetaMask not found");
+
+  // backend state tells who is active + which wallet is bound to that player
+  const sRes = await fetch(`${API_URL}/state`);
+  const state = await sRes.json();
+  const p = state.activePlayer;
+  const addr = state.playerWallets?.[p];
+
+  if (!addr) {
+    throw new Error(`Active player P${p + 1} has no connected wallet. Connect it first.`);
+  }
+
+  // ask backend for the exact message (includes nonce)
+  const { message } = await getActionMessage(p, action, params);
+
+  // sign it with the wallet that is connected for that player
+  const signature = await personalSign(message, addr);
+
+  return { address: addr, message, signature };
+};
+
+// API helper that supports signed actions
 const apiCall = async (endpoint, method = 'GET', body = null) => {
   try {
     const options = {
@@ -16,11 +60,25 @@ const apiCall = async (endpoint, method = 'GET', body = null) => {
     if (body) options.body = JSON.stringify(body);
 
     const res = await fetch(`${API_URL}${endpoint}`, options);
+
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || 'API Error');
+      // backend sometimes returns json, sometimes plain text
+      let errText = '';
+      try {
+        const errJson = await res.json();
+        errText = errJson?.detail || JSON.stringify(errJson);
+      } catch {
+        errText = await res.text();
+      }
+      throw new Error(errText || 'API Error');
     }
-    return await res.json();
+
+    // Some endpoints may return empty; but ours return json state
+    try {
+      return await res.json();
+    } catch {
+      return null;
+    }
   } catch (e) {
     console.error("API Action Failed:", e);
     return null;
@@ -80,16 +138,6 @@ const Board = () => {
   const [bankruptModal, setBankruptModal] = useState(null); // { playerIndex }
   const lastEliminatedRef = useRef([false, false, false, false]);
 
-  const handleSendChat = async () => {
-    if (!chatMsg.trim()) return;
-
-    const textToSend = chatMsg;
-    setChatMsg('');
-
-    const newState = await apiCall('/chat', 'POST', { text: textToSend });
-    if (newState) setGameState(newState);
-  };
-
   // === DATA FETCHING ===
   const fetchState = async () => {
     if (isRolling) return;
@@ -126,6 +174,9 @@ const Board = () => {
   const gameOver = gameState ? gameState.gameOver : false;
   const winner = gameState ? gameState.winner : null;
   const skipTurns = gameState ? gameState.skipTurns : [0, 0, 0, 0];
+
+  const playerWallets = gameState ? gameState.playerWallets : [null, null, null, null];
+  const pendingSettlement = gameState ? gameState.pendingSettlement : null;
 
   const activeEliminated = !!eliminated?.[activePlayer];
 
@@ -266,15 +317,34 @@ const Board = () => {
     });
   };
 
+  // === SIGNED ACTION WRAPPER ===
+  const signedAction = async (action, params, endpoint, bodyExtra = null) => {
+    try {
+      const proof = await buildProofForActiveTurn(action, params);
+      const payload = bodyExtra ? { ...bodyExtra, proof } : { proof };
+      const newState = await apiCall(endpoint, 'POST', payload);
+      if (newState) setGameState(newState);
+      return newState;
+    } catch (e) {
+      console.error(e);
+      alert(e.message || 'Action failed');
+      return null;
+    }
+  };
+
   // === ACTIONS ===
   const handleRoll = async () => {
     if (gameOver) return;
     if (activeEliminated) return;
     if (isRolling || buyPrompt || tradeOpen || incomingOffersForActive.length > 0 || !!chanceCard) return;
+    if (pendingSettlement) {
+      alert('Pending on-chain settlement. Finish /settle first.');
+      return;
+    }
 
     setIsRolling(true);
-    const newState = await apiCall('/roll', 'POST');
 
+    const newState = await signedAction('ROLL', '', '/roll');
     if (newState) {
       const moverIdx = activePlayer;
       const oldPos = visualPlayerPos[moverIdx];
@@ -285,8 +355,6 @@ const Board = () => {
 
       const stepsToAnimate = steps === 0 ? 0 : steps;
       if (stepsToAnimate > 0) await animateMove(moverIdx, oldPos, stepsToAnimate);
-
-      setGameState(newState);
     }
 
     setIsRolling(false);
@@ -294,17 +362,25 @@ const Board = () => {
 
   const handleBuy = async () => {
     if (!buyPrompt || gameOver || activeEliminated) return;
-    const newState = await apiCall('/buy', 'POST', { tileId: buyPrompt.tileId });
-    if (newState) setGameState(newState);
+    if (pendingSettlement) {
+      alert('Pending on-chain settlement. Finish /settle first.');
+      return;
+    }
+
+    // backend expects BUY signed params: tileId=<id>
+    await signedAction('BUY', `tileId=${buyPrompt.tileId}`, '/buy', { tileId: buyPrompt.tileId });
   };
 
   const handleSkipBuy = async () => {
     if (gameOver || activeEliminated) return;
-    const newState = await apiCall('/skip_buy', 'POST');
-    if (newState) setGameState(newState);
+    if (!buyPrompt) return;
+
+    await signedAction('SKIP_BUY', `tileId=${buyPrompt.tileId}`, '/skip_buy');
   };
 
   const handleReset = async () => {
+    // reset is usually admin/debug — in many backends it is unsigned.
+    // If your backend requires signature for RESET, change to signedAction('RESET','', '/reset')
     const newState = await apiCall('/reset', 'POST');
     if (newState) {
       setGameState(newState);
@@ -320,6 +396,7 @@ const Board = () => {
   // --- Trade Logic ---
   const openTradeSell = () => {
     if (gameOver || activeEliminated) return;
+    if (pendingSettlement) return;
     const tileId = myOwnedTiles[0] ?? null;
     const target = (activePlayer + 1) % playersCount;
     setTradeForm({ mode: 'sell', tileId, target, priceFC: 500 });
@@ -328,6 +405,7 @@ const Board = () => {
 
   const openTradeBuy = () => {
     if (gameOver || activeEliminated) return;
+    if (pendingSettlement) return;
     const tileId = otherOwnedTiles[0] ?? null;
     const owner = tileId != null ? ownership[tileId] : null;
     setTradeForm({
@@ -373,6 +451,10 @@ const Board = () => {
 
   const createTradeOffer = async () => {
     if (gameOver || activeEliminated) return;
+    if (pendingSettlement) {
+      alert('Pending on-chain settlement. Finish /settle first.');
+      return;
+    }
 
     const priceFC = Math.max(0, Math.floor(Number(tradeForm.priceFC) || 0));
     const tileId = tradeForm.tileId != null ? Number(tradeForm.tileId) : null;
@@ -380,24 +462,54 @@ const Board = () => {
 
     if (tileId == null) return;
 
-    const body = { type: tradeForm.mode, to: target, tileId, priceFC };
-    const newState = await apiCall('/offers', 'POST', body);
-    if (newState) {
-      setGameState(newState);
-      setTradeOpen(false);
-    }
+    const offerType = tradeForm.mode; // "sell" | "buy"
+
+    // backend expects: type=<>&to=<>&tileId=<>&priceFC=<>
+    const params = `type=${offerType}&to=${target}&tileId=${tileId}&priceFC=${priceFC}`;
+
+    await signedAction('CREATE_OFFER', params, '/offers', {
+      type: offerType,
+      to: target,
+      tileId,
+      priceFC,
+    });
+
+    setTradeOpen(false);
   };
 
   const acceptOffer = async (id) => {
     if (gameOver || activeEliminated) return;
-    const newState = await apiCall(`/offers/${id}/accept`, 'POST');
-    if (newState) setGameState(newState);
+    if (pendingSettlement) {
+      alert('Pending on-chain settlement. Finish /settle first.');
+      return;
+    }
+
+    await signedAction('ACCEPT_OFFER', `offerId=${id}`, `/offers/${id}/accept`);
   };
 
   const declineOffer = async (id) => {
     if (gameOver || activeEliminated) return;
-    const newState = await apiCall(`/offers/${id}/decline`, 'POST');
-    if (newState) setGameState(newState);
+    if (pendingSettlement) {
+      alert('Pending on-chain settlement. Finish /settle first.');
+      return;
+    }
+
+    await signedAction('DECLINE_OFFER', `offerId=${id}`, `/offers/${id}/decline`);
+  };
+
+  const handleSendChat = async () => {
+    if (!chatMsg.trim()) return;
+    if (gameOver) return;
+
+    const textToSend = chatMsg;
+    setChatMsg('');
+
+    // Chat should be signed by ACTIVE player too
+    const newState = await signedAction('CHAT', `text=${encodeURIComponent(textToSend)}`, '/chat', { text: textToSend });
+    if (!newState) {
+      // if failed, restore input so user doesn't lose text
+      setChatMsg(textToSend);
+    }
   };
 
   // --- Chat Auto Scroll ---
@@ -446,8 +558,10 @@ const Board = () => {
                     !!buyPrompt ||
                     tradeOpen ||
                     incomingOffersForActive.length > 0 ||
-                    !!chanceCard
+                    !!chanceCard ||
+                    !!pendingSettlement
                   }
+                  title={pendingSettlement ? 'Pending on-chain settlement' : ''}
                 >
                   {gameOver
                     ? 'GAME OVER'
@@ -461,10 +575,26 @@ const Board = () => {
                             ? 'OFFERS...'
                             : !!chanceCard
                               ? 'CHANCE...'
-                              : skipTurns?.[activePlayer] > 0
-                                ? `PRISON (${skipTurns[activePlayer]})`
-                                : `P${activePlayer + 1} ROLL`}
+                              : pendingSettlement
+                                ? 'SETTLE...'
+                                : skipTurns?.[activePlayer] > 0
+                                  ? `PRISON (${skipTurns[activePlayer]})`
+                                  : `P${activePlayer + 1} ROLL`}
                 </button>
+
+                {/* tiny helper: show which wallet is bound to active player */}
+                <div style={{ marginTop: 6, fontSize: 11, opacity: 0.75 }}>
+                  Active wallet:{' '}
+                  {playerWallets?.[activePlayer]
+                    ? `${playerWallets[activePlayer].slice(0, 6)}...${playerWallets[activePlayer].slice(-4)}`
+                    : 'not connected'}
+                </div>
+
+                {pendingSettlement && (
+                  <div style={{ marginTop: 6, fontSize: 11, opacity: 0.85 }}>
+                    Settlement required: {pendingSettlement.kind} — tile #{pendingSettlement.tileId}
+                  </div>
+                )}
               </div>
 
               <div className="chat-box">
@@ -500,14 +630,15 @@ const Board = () => {
                 <div className="chat-input-wrapper">
                   <input
                     className="chat-input"
-                    placeholder={`Say as Player ${activePlayer + 1}...`}
+                    placeholder={`Say as Active Player (P${activePlayer + 1})...`}
                     value={chatMsg}
                     onChange={(e) => setChatMsg(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleSendChat();
                     }}
+                    disabled={!!pendingSettlement}
                   />
-                  <button className="chat-send-btn" onClick={handleSendChat}>➤</button>
+                  <button className="chat-send-btn" onClick={handleSendChat} disabled={!!pendingSettlement}>➤</button>
                 </div>
               </div>
             </div>
@@ -616,7 +747,11 @@ const Board = () => {
                   <div className="wallet-name">
                     PLAYER {idx + 1} {isOut ? '— BANKRUPT' : ''}
                   </div>
-                  <div className="wallet-addr">0xWallet...{idx}</div>
+                  <div className="wallet-addr">
+                    {playerWallets?.[idx]
+                      ? `${playerWallets[idx].slice(0, 6)}...${playerWallets[idx].slice(-4)}`
+                      : `0xWallet...${idx}`}
+                  </div>
                 </div>
               </div>
 
@@ -642,14 +777,14 @@ const Board = () => {
           <button
             className="buy-btn secondary"
             onClick={openTradeSell}
-            disabled={tradeOpen || gameOver || activeEliminated}
+            disabled={tradeOpen || gameOver || activeEliminated || !!pendingSettlement}
           >
             SELL CURRENCY
           </button>
           <button
             className="buy-btn secondary"
             onClick={openTradeBuy}
-            disabled={tradeOpen || gameOver || activeEliminated}
+            disabled={tradeOpen || gameOver || activeEliminated || !!pendingSettlement}
           >
             BUY CURRENCY
           </button>
@@ -675,8 +810,8 @@ const Board = () => {
                   <div className="offer-bottom">
                     <div className="offer-price">{o.priceFC} FC</div>
                     <div className="offer-actions">
-                      <button className="buy-btn secondary" onClick={() => declineOffer(o.id)} disabled={gameOver || activeEliminated}>DECLINE</button>
-                      <button className="buy-btn primary" onClick={() => acceptOffer(o.id)} disabled={gameOver || activeEliminated}>ACCEPT</button>
+                      <button className="buy-btn secondary" onClick={() => declineOffer(o.id)} disabled={gameOver || activeEliminated || !!pendingSettlement}>DECLINE</button>
+                      <button className="buy-btn primary" onClick={() => acceptOffer(o.id)} disabled={gameOver || activeEliminated || !!pendingSettlement}>ACCEPT</button>
                     </div>
                   </div>
                 </div>
@@ -715,11 +850,16 @@ const Board = () => {
                     {renderFlarePrice(tile.price)} <span style={{ opacity: 0.8 }}>FC</span>
                   </span>
                 </div>
+                {pendingSettlement && (
+                  <div style={{ marginTop: 10, fontSize: 12, opacity: 0.85 }}>
+                    Payment required. After FXRP transfer, call <b>/settle</b> with tx hash.
+                  </div>
+                )}
               </div>
 
               <div className="buy-modal-actions">
-                <button className="buy-btn secondary" onClick={handleSkipBuy}>SKIP</button>
-                <button className="buy-btn primary" onClick={handleBuy}>BUY</button>
+                <button className="buy-btn secondary" onClick={handleSkipBuy} disabled={!!pendingSettlement}>SKIP</button>
+                <button className="buy-btn primary" onClick={handleBuy} disabled={!!pendingSettlement}>BUY</button>
               </div>
             </div>
           </div>
@@ -822,7 +962,7 @@ const Board = () => {
                 <button
                   className="buy-btn primary"
                   onClick={createTradeOffer}
-                  disabled={!tradeForm.tileId && tradeForm.tileId !== 0}
+                  disabled={(!tradeForm.tileId && tradeForm.tileId !== 0) || !!pendingSettlement}
                 >
                   SEND OFFER
                 </button>

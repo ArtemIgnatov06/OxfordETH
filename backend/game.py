@@ -121,6 +121,16 @@ class GameState:
         self.pending_settlement = None
 
     # ---------------- helpers ----------------
+    def chat(self, text: str, proof: Optional[SigProof] = None):
+        text = (text or "").strip()
+        if not text:
+            return
+
+        # CHAT подписываем так же, как остальные actions
+        self._require_sig("CHAT", f"text={text}", proof)
+
+        p = self.active_player
+        self.add_message(f"P{p+1}", text, "chat")
 
     def add_message(self, user: str, text: str, msg_type: str = "chat", delta: Optional[int] = None):
         self.messages.append(Message(user, text, msg_type, delta))
@@ -212,6 +222,8 @@ class GameState:
         self._check_bankruptcy_and_win()
 
     # ---------------- wallet connect + signatures ----------------
+
+
 
     def connect_wallet(self, player_index: int, proof: SigProof, expected_message: str):
         if player_index < 0 or player_index >= self.players_count:
