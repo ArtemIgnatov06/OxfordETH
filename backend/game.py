@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Literal
-import random
+import crypto_random
 import time
 import uuid
 
@@ -83,8 +83,7 @@ class GameState:
             raise ValueError("Blocked: incoming offers pending")
 
     def _roll_dice(self) -> List[int]:
-        d1 = random.randint(1, 6)
-        d2 = random.randint(1, 6)
+        d1, d2 = crypto_random.roll_dice()
         self.dice = [d1, d2]
         return self.dice
 
