@@ -25,6 +25,10 @@ class OfferCreateBody(BaseModel):
     priceFC: int = Field(..., ge=1)
 
 
+class ChatBody(BaseModel):
+    text: str
+
+
 class BuyBody(BaseModel):
     tileId: Optional[int] = Field(None, ge=0, le=23)
 
@@ -79,4 +83,11 @@ def accept_offer(offer_id: str):
 @app.post("/offers/{offer_id}/decline")
 def decline_offer(offer_id: str):
     GAME.decline_offer(offer_id)
+    return snapshot()
+
+@app.post("/chat")
+def send_chat(body: ChatBody):
+    # Добавляем сообщение от имени ТЕКУЩЕГО активного игрока
+    p_idx = GAME.active_player
+    GAME.add_message(f"P{p_idx + 1}", body.text)
     return snapshot()
