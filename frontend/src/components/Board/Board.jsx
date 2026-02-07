@@ -1,5 +1,5 @@
 // src/components/Board/Board.jsx
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import './Board.css';
 import { TILES, FAMILY_COLORS } from './BoardData';
 
@@ -10,7 +10,8 @@ const Board = () => {
   const [dice, setDice] = useState([1, 1]);
   const [chatMsg, setChatMsg] = useState('');
   const [messages, setMessages] = useState([{ user: 'System', text: 'Welcome to FlarePoly Testnet!' }]);
-
+  const chatListRef = useRef(null);
+const shouldStickToBottomRef = useRef(true);
   const playersCount = PLAYERS_MAX;
 
   const [playerPos, setPlayerPos] = useState(() => Array.from({ length: playersCount }, () => 0));
@@ -19,9 +20,9 @@ const Board = () => {
   const base = import.meta.env.BASE_URL;
   const getTokenIconSrc = (tile) => `${base}images/${tile.name}.png`;
 
-  const addMessage = (user, text) => {
-    setMessages((prev) => [...prev.slice(-4), { user, text }]);
-  };
+    const addMessage = (user, text) => {
+    setMessages((prev) => [...prev, { user, text }]);
+    };
 
   const getPositionStyle = (index) => {
     let row, col;
@@ -98,6 +99,17 @@ const Board = () => {
     return map;
   }, [playerPos, playersCount]);
 
+    useEffect(() => {
+    const el = chatListRef.current;
+    if (!el) return;
+
+    // автоскролл вниз только если пользователь "внизу"
+    if (shouldStickToBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [messages]);
+
+  
   return (
     <div className="board-layout">
       <div className="monopoly-wrapper">
@@ -117,11 +129,23 @@ const Board = () => {
               </div>
 
               <div className="chat-box">
-                <div className="chat-messages">
-                  {messages.map((m, i) => (
+                <div
+                className="chat-messages"
+                ref={chatListRef}
+                onScroll={() => {
+                    const el = chatListRef.current;
+                    
+                    if (!el) return;
+                    // считаем "я внизу", если до конца осталось <= 24px
+                    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
+                    shouldStickToBottomRef.current = atBottom;
+                }}
+                >
+                {messages.map((m, i) => (
                     <div key={i}><strong>{m.user}:</strong> {m.text}</div>
-                  ))}
+                ))}
                 </div>
+
                 <input
                   className="chat-input"
                   placeholder="Type..."
