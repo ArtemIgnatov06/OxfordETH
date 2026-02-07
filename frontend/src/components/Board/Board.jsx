@@ -13,14 +13,14 @@ const Board = () => {
   const getPositionStyle = (index) => {
     let row, col;
 
-    if (index === 0) { row = 7; col = 7; }
-    else if (index > 0 && index < 6) { row = 7; col = 7 - index; }
-    else if (index === 6) { row = 7; col = 1; }
-    else if (index > 6 && index < 12) { row = 7 - (index - 6); col = 1; }
-    else if (index === 12) { row = 1; col = 1; }
-    else if (index > 12 && index < 18) { row = 1; col = 1 + (index - 12); }
-    else if (index === 18) { row = 1; col = 7; }
-    else { row = 1 + (index - 18); col = 7; }
+    if (index === 0) { row = 7; col = 7; }               // START
+    else if (index > 0 && index < 6) { row = 7; col = 7 - index; } // bottom row
+    else if (index === 6) { row = 7; col = 1; }          // JAIL
+    else if (index > 6 && index < 12) { row = 7 - (index - 6); col = 1; } // left col
+    else if (index === 12) { row = 1; col = 1; }         // HODL
+    else if (index > 12 && index < 18) { row = 1; col = 1 + (index - 12); } // top row
+    else if (index === 18) { row = 1; col = 7; }         // GO TO JAIL
+    else { row = 1 + (index - 18); col = 7; }            // right col
 
     return { gridRow: row, gridColumn: col };
   };
@@ -43,12 +43,11 @@ const Board = () => {
     }
   };
 
-  // Иконка токена из public/images
-  const getTokenIconSrc = (tile) => {
-    // ожидаем файлы типа public/images/DOGE.png (или .svg)
-    // если у тебя другой формат — поменяй расширение тут
-    return `/images/${tile.name}.png`;
-  };
+  // базовый путь (важно для деплоя не из корня)
+  const base = import.meta.env.BASE_URL;
+
+  // Иконки коинов из public/images/<NAME>.png
+  const getTokenIconSrc = (tile) => `${base}images/${tile.name}.png`;
 
   return (
     <div className="monopoly-wrapper">
@@ -91,6 +90,7 @@ const Board = () => {
             className={`tile ${tile.type}`}
             style={getPositionStyle(tile.id)}
           >
+            {/* цветная шапка для property */}
             {tile.type === 'property' && (
               <div
                 className="color-bar"
@@ -99,9 +99,60 @@ const Board = () => {
             )}
 
             <div className="tile-content">
-              {tile.type === 'corner' ? (
-                <div style={{ fontSize: '10px' }}>{tile.name}</div>
-              ) : tile.type === 'chance' ? (
+             {tile.type === 'corner' ? (
+                tile.subtype === 'gotojail' ? (
+                    <div className="corner-full">
+                    <img
+                        className="corner-full-img"
+                        src={`${base}images/GOTOJAIL.png`}
+                        alt="GO TO JAIL"
+                        loading="lazy"
+                    />
+                    <div className="corner-overlay">
+                        <div className="corner-title-big"></div>
+                    </div>
+                    </div>
+                ) : tile.subtype === 'jail' ? (
+                    <div className="corner-full">
+                    <img
+                        className="corner-full-img"
+                        src={`${base}images/JAIL.png`}
+                        alt="JAIL"
+                        loading="lazy"
+                    />
+                    <div className="corner-overlay">
+                        <div className="corner-title-big"></div>
+                    </div>
+                    </div>
+                ) : tile.subtype === 'go' ? (
+                    <div className="corner-full">
+                    <img
+                        className="corner-full-img"
+                        src={`${base}images/START.png`}
+                        alt="START"
+                        loading="lazy"
+                    />
+                    <div className="corner-overlay">
+                        <div className="corner-title-big"></div>
+                    </div>
+                    </div>
+                ) : tile.subtype === 'parking' ? (
+                    <div className="corner-full">
+                    <img
+                        className="corner-full-img"
+                        src={`${base}images/HODL.png`}
+                        alt="HODL"
+                        loading="lazy"
+                    />
+                    <div className="corner-overlay">
+                        <div className="corner-title-big"></div>
+                    </div>
+                    </div>
+                ) : (
+                    <div className="corner-title">{tile.name}</div>
+                )
+                ) : tile.type === 'chance' ? (
+                // CHANCE
                 <div style={{ color: '#a5b4fc' }}>❓<br />CHANCE</div>
               ) : tile.type === 'property' ? (
                 // PROPERTY: иконка + название + цена
@@ -112,7 +163,6 @@ const Board = () => {
                       src={getTokenIconSrc(tile)}
                       alt={tile.name}
                       loading="lazy"
-                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
                     />
                   </div>
 
@@ -132,6 +182,7 @@ const Board = () => {
               )}
             </div>
 
+            {/* debug id */}
             <div style={{ position: 'absolute', bottom: 1, right: 2, fontSize: 8, opacity: 0.3 }}>
               {tile.id}
             </div>
