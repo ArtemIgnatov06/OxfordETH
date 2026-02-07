@@ -27,20 +27,7 @@ const apiCall = async (endpoint, method = 'GET', body = null) => {
   }
 };
 //chat
-const handleSendChat = async () => {
-    if (!chatMsg.trim()) return; // Не отправляем пустые
-    
-    const textToSend = chatMsg;
-    setChatMsg(''); // Сразу очищаем поле ввода
-    
-    // Отправляем на сервер
-    const newState = await apiCall('/chat', 'POST', { text: textToSend });
-    
-    if (newState) {
-      setGameState(newState);
-      // Скролл вниз сработает автоматически через useEffect
-    }
-  };
+
 
 const PLAYER_COLORS = ['#22c55e', '#3b82f6', '#a855f7', '#f97316'];
 
@@ -70,6 +57,19 @@ const Board = () => {
   const base = import.meta.env.BASE_URL;
   const getTokenIconSrc = (tile) => `${base}images/${tile.name}.png`;
 
+  const handleSendChat = async () => {
+    if (!chatMsg.trim()) return; 
+    
+    const textToSend = chatMsg;
+    setChatMsg(''); 
+    
+    const newState = await apiCall('/chat', 'POST', { text: textToSend });
+    
+    if (newState) {
+      setGameState(newState);
+    }
+  };
+  
   // === DATA FETCHING ===
   
   // Функция обновления стейта
