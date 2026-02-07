@@ -644,14 +644,14 @@ const Board = () => {
             onClick={openTradeSell}
             disabled={tradeOpen || gameOver || activeEliminated}
           >
-            SELL STREET
+            SELL CURRENCY
           </button>
           <button
             className="buy-btn secondary"
             onClick={openTradeBuy}
             disabled={tradeOpen || gameOver || activeEliminated}
           >
-            BUY STREET
+            BUY CURRENCY
           </button>
         </div>
 
