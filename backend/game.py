@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Literal
 import crypto_random
 import time
 import uuid
-
+import random
 from board import BOARD_LEN, TILES_BY_ID, BUYABLE_PROPERTY_IDS, CHANCE_IDS
 
 
