@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import './Board.css';
 import { TILES, FAMILY_COLORS } from './BoardData';
 
-const API_URL = 'http://localhost:8000'; // Адрес вашего бекенда
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'; // Адрес вашего бекенда
 
 // Вспомогательная функция для API запросов
 const apiCall = async (endpoint, method = 'GET', body = null) => {
