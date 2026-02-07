@@ -671,75 +671,42 @@
 }
 
 
-/* ====== RESPONSIVE WALLETS PANEL (never overlap board) ====== */
-
-/* Можно менять тут, если поменяешь размер доски */
-:root{
-  --board-size: 800px;
-  --wallet-gap: 18px;
-  --wallet-base-w: 340px; /* желаемая ширина на больших экранах */
+/* WALLETS PANEL — smaller (for everyone) */
+.wallets-panel {
+  width: 240px;          /* ✅ было 340px */
+  max-width: 240px;
+  padding: 10px;         /* ✅ было 14px */
+  border-radius: 12px;   /* чуть компактнее */
 }
 
-/* Панель справа */
-.wallets-panel{
-  position: fixed !important;
-  right: var(--wallet-gap) !important;
-  top: 50% !important;
-
-  width: var(--wallet-base-w);
-  max-width: calc(100vw - var(--wallet-gap) * 2);
-  padding: 14px;
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.8);
-  border: 1px solid #334155;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.35);
-  backdrop-filter: blur(10px);
-  z-index: 999;
-
-  /* ✅ магия: если экран узкий, панель уменьшается */
-  /* 1) оставляем место под доску (board-size) + отступы */
-  /* 2) остаток делим на базовую ширину панели */
-  /* 3) clamp ограничивает масштаб от 0.72 до 1 */
-  --available: calc(100vw - var(--board-size) - var(--wallet-gap) * 3);
-  --scale: clamp(0.72, calc(var(--available) / var(--wallet-base-w)), 1);
-
-  transform: translateY(-50%) scale(var(--scale)) !important;
-  transform-origin: right center;
+.wallet-card {
+  gap: 10px;             /* было 12px */
+  padding: 8px 8px;      /* было 10px 10px */
+  margin-bottom: 8px;    /* было 10px */
 }
 
-/* На реально маленьких экранах дополнительно уплотняем */
-@media (max-width: 1200px){
-  .wallets-panel{
-    padding: 12px;
-  }
-  .wallet-card{
-    padding: 9px 9px;
-    gap: 10px;
-  }
-  .wallet-chip{
-    padding: 5px 7px;
-    font-size: 10.5px;
-    border-radius: 9px;
-    white-space: nowrap;
-  }
-}
-
-/* Чтобы чипы не вылезали — перенос на вторую строку */
-.wallet-right{
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+.wallet-right {
+  flex-wrap: wrap;       /* ✅ чипы на 2 строку */
   justify-content: flex-end;
+  gap: 6px;
 }
 
-/* Текст слева не раздвигает карточку */
-.wallet-left{ min-width: 0; }
-.wallet-meta{ min-width: 0; }
+.wallet-chip {
+  padding: 4px 6px;      /* компактнее */
+  font-size: 10px;       /* меньше */
+  border-radius: 9px;
+  white-space: nowrap;
+}
+
+.wallet-name { font-size: 11px; }
+.wallet-addr { font-size: 10px; }
+
+.wallet-left,
+.wallet-meta { min-width: 0; }
 
 .wallet-name,
-.wallet-addr{
-  max-width: 170px;
+.wallet-addr {
+  max-width: 120px;      /* ✅ было 170px — сильнее ужимаем */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
