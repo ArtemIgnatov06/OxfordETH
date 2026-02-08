@@ -35,4 +35,9 @@ class ChanceDeck:
         else:
             player.wallet.pay(-event.delta)
 
-        return {"type": "news", "delta": event.delta, "text": event.text}
+        return {
+            "text": "Bank error in your favour. Collect 2 FXRP.",
+            "delta": +200,  # in-game FC
+            "payoutFxrp": 2  # FXRP (human units)
+        }
+

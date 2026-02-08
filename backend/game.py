@@ -23,6 +23,7 @@ OfferType = Literal["sell", "buy"]
 
 START_TILE_ID = 0
 START_BONUS_FC = 200
+START_BONUS_FXRP = float(os.getenv("START_BONUS_FXRP", "0"))
 PRISON_WAIT_TURNS = 1
 PRISON_TILE_ID = 6
 GOTO_PRISON_TILE_ID = 18
@@ -124,6 +125,35 @@ class GameState:
         self.pending_settlement = None
 
     # ---------------- helpers ----------------
+    def _bank_pay_fxrp(self, player_index: int, fxrp_amount: float, reason: str):
+        if fxrp_amount <= 0:
+            return
+
+        addr = self.player_wallets[player_index]
+        if not addr:
+            self.add_message(
+                "System",
+                f"On-chain payout skipped ({reason}): wallet not connected",
+                "system",
+            )
+            return
+
+        amount_raw = int(round(fxrp_amount * (10 ** FXRP_DECIMALS)))
+
+        try:
+            txh = fxrp_client.transfer_from_bank(addr, amount_raw)
+            self.add_message(
+                "System",
+                f"Bank paid {fxrp_amount} FXRP for {reason} (tx={txh[:10]}...)",
+                "system",
+            )
+        except Exception as e:
+            self.add_message(
+                "System",
+                f"Bank payout failed ({reason}): {e}",
+                "system",
+            )
+
     def chat(self, text: str, proof: Optional[SigProof] = None):
         text = (text or "").strip()
         if not text:
@@ -201,6 +231,8 @@ class GameState:
             self.balances[player_index] += START_BONUS_FC
             self.add_message("System", f"P{player_index + 1} received {START_BONUS_FC} FC for passing START", "system")
             self._check_bankruptcy_and_win()
+            self._bank_pay_fxrp(player_index, START_BONUS_FXRP, "passing START")
+
             if self.game_over:
                 return new_pos
 
@@ -211,17 +243,57 @@ class GameState:
             self.balances[player_index] += START_BONUS_FC
             self.add_message("System", f"P{player_index + 1} received {START_BONUS_FC} FC for landing on START", "system")
             self._check_bankruptcy_and_win()
+            self._bank_pay_fxrp(player_index, START_BONUS_FXRP, "landing on START")
 
         return new_pos
 
     def _chance_news(self, player_index: int):
         w = FcWallet(self.balances[player_index])
-        pl = Player(id=player_index, name=f"P{player_index+1}", pos=self.player_pos[player_index], wallet=w)
+        pl = Player(
+            id=player_index,
+            name=f"P{player_index + 1}",
+            pos=self.player_pos[player_index],
+            wallet=w,
+        )
 
         result = self.chance_deck.apply(pl)
         self.balances[player_index] = pl.wallet.balance
 
-        self.add_message("News", result["text"], msg_type="news", delta=result.get("delta"))
+        # In-game message
+        self.add_message(
+            "News",
+            result["text"],
+            msg_type="news",
+            delta=result.get("delta"),
+        )
+
+        # --- ON-CHAIN BANK → PLAYER PAYOUT ---
+        payout_fxrp = result.get("payoutFxrp")
+        if payout_fxrp and payout_fxrp > 0:
+            addr = self.player_wallets[player_index]
+
+            if not addr:
+                self.add_message(
+                    "System",
+                    "Chance payout skipped (wallet not connected)",
+                    "system",
+                )
+            else:
+                amount_raw = int(payout_fxrp * (10 ** FXRP_DECIMALS))
+                try:
+                    txh = fxrp_client.transfer_from_bank(addr, amount_raw)
+                    self.add_message(
+                        "System",
+                        f"Bank paid {payout_fxrp} FXRP on-chain (tx={txh[:10]}...)",
+                        "system",
+                    )
+                except Exception as e:
+                    self.add_message(
+                        "System",
+                        f"Bank payout failed: {e}",
+                        "system",
+                    )
+
         self._check_bankruptcy_and_win()
 
     # ---------------- wallet connect + signatures ----------------
