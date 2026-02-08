@@ -284,8 +284,7 @@ class GameState:
             raise ValueError("Blocked: buyPrompt pending")
         if len(self.incoming_offers_for_active()) > 0:
             raise ValueError("Blocked: incoming offers pending")
-        if self.pending_settlement is not None:
-            raise ValueError("Blocked: pending on-chain settlement")
+
 
     def _roll_dice(self) -> List[int]:
         d1, d2 = crypto_random.roll_dice()
@@ -478,50 +477,50 @@ class GameState:
 
         self.next_player()
 
-    def buy(self, proof: Optional[SigProof] = None, tile_id: Optional[int] = None):
+    def buy(self, *_, **__):
         if self.buy_prompt is None:
             raise ValueError("No buy prompt")
 
-        prompt_tile = self.buy_prompt["tileId"]
+        tile_id = self.buy_prompt["tileId"]
         p = self.buy_prompt["playerIndex"]
 
         if p != self.active_player:
             raise ValueError("Not your buy prompt")
-        if tile_id is not None and tile_id != prompt_tile:
-            raise ValueError("Tile mismatch")
 
-        self._require_sig("BUY", f"tileId={prompt_tile}", proof)
-
-        if prompt_tile in self.ownership:
+        if tile_id in self.ownership:
             self.buy_prompt = None
-            self.add_message("System", "Buy failed: already owned", "system")
             self.next_player()
             return
 
-        tile = TILES_BY_ID[prompt_tile]
+        tile = TILES_BY_ID[tile_id]
         if tile.price is None:
             raise ValueError("Tile has no price")
 
-        buyer_addr = self.player_wallets[p]
-        if _require_sig_enabled() and not buyer_addr:
-            raise ValueError("Wallet not connected")
+        price_fc = int(tile.price)
 
-        cost_raw = self._usd_to_fxrp_raw(float(tile.price))
+        if self.balances[p] < price_fc:
+            self.add_message(
+                "System",
+                f"P{p + 1} cannot afford {tile.name} ({price_fc} FC)",
+                "system",
+            )
+            self.buy_prompt = None
+            self.next_player()
+            return
 
-        to_addr = os.getenv("TREASURY_WALLET")
-        if not to_addr:
-            raise ValueError("TREASURY_WALLET not configured")
+        # ---- HARD-CODED FC PAYMENT ----
+        self.balances[p] -= price_fc
+        self.ownership[tile_id] = p
 
-        self.pending_settlement = {
-            "kind": "buy",
-            "from": buyer_addr,
-            "to": to_addr,
-            "amountRaw": cost_raw,
-            "tileId": prompt_tile,
-            "offerId": None,
-        }
+        self.add_message(
+            "System",
+            f"P{p + 1} bought {tile.name} for {price_fc} FC",
+            "system",
+        )
 
-        self.add_message("System", f"Payment required: send FXRP(raw={cost_raw}) then submit tx hash via /settle", "system")
+        self.buy_prompt = None
+        self._check_bankruptcy_and_win()
+        self.next_player()
 
     def skip_buy(self, proof: Optional[SigProof] = None):
         if self.buy_prompt is None:
@@ -631,55 +630,8 @@ class GameState:
         self._remove_offer(offer_id)
         self.next_player()
 
-    def settle(self, proof: Optional[SigProof], tx_hash: str):
-        if not self.pending_settlement:
-            raise ValueError("No pending settlement")
-
-        self._require_sig("SETTLE", f"tx={tx_hash}", proof)
-
-        ps = self.pending_settlement
-        self._verify_fxrp_transfer(
-            tx_hash=tx_hash,
-            expected_from=ps["from"],
-            expected_to=ps["to"],
-            expected_amount_raw=int(ps["amountRaw"]),
-        )
-
-        tile = TILES_BY_ID[ps["tileId"]]
-
-        if ps["kind"] == "buy":
-            p = self.active_player
-            self.ownership[ps["tileId"]] = p
-            self.add_message("System", f"Buy settled: P{p+1} bought {tile.name} (paid on-chain)", "system")
-            self.buy_prompt = None
-            self.pending_settlement = None
-            self.next_player()
-            return
-
-        if ps["kind"] == "trade":
-            offer_id = ps["offerId"]
-            offer = self._find_offer(offer_id)
-
-            seller = offer.from_player if offer.type == "sell" else offer.to_player
-            buyer = offer.to_player if offer.type == "sell" else offer.from_player
-
-            # Apply FC transfer after on-chain proof
-            self.balances[buyer] -= offer.price_fc
-            self.balances[seller] += offer.price_fc
-            self._check_bankruptcy_and_win()
-            if self.game_over:
-                self._remove_offer(offer_id)
-                self.pending_settlement = None
-                return
-
-            self.ownership[offer.tile_id] = buyer
-            self.add_message("System", f"Trade settled: {tile.name} P{seller+1} → P{buyer+1} (paid on-chain)", "system")
-            self._remove_offer(offer_id)
-            self.pending_settlement = None
-            self.next_player()
-            return
-
-        raise ValueError("Unknown settlement kind")
+    def settle(self, *_, **__):
+        raise ValueError("On-chain settlement is disabled")
 
     # ---------------- serialization ----------------
 
