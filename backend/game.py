@@ -89,7 +89,7 @@ class GameState:
     buy_prompt: Optional[Dict] = None
 
     # In-game FC (for bankruptcy/winner logic)
-    balances: List[int] = field(default_factory=lambda: [4200, 1337, 777, 9001])
+    balances: List[int] = field(default_factory=lambda: [1000, 1000, 1000])
 
     trade_offers: List[TradeOffer] = field(default_factory=list)
 
@@ -111,7 +111,7 @@ class GameState:
         self.ownership = {}
         self.buy_prompt = None
 
-        self.balances = [4200, 1337, 777, 9001][: self.players_count]
+        self.balances = [1000, 1000, 1000][: self.players_count]
         self.trade_offers = []
         self.messages = [Message("System", "Welcome to FlarePoly Testnet!", "system")]
 
