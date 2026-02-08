@@ -63,6 +63,8 @@ const sendFxrpTransfer = async ({ from, to, amountRaw }) => {
 
   // IMPORTANT: amountRaw MUST be BigInt/string (NOT number) to avoid overflow
   const amount = BigInt(String(amountRaw));
+  const tx = await token.transfer(to, amount);
+
 
   const provider = new ethers.BrowserProvider(window.ethereum);
 
@@ -72,7 +74,7 @@ const sendFxrpTransfer = async ({ from, to, amountRaw }) => {
 
   console.log("[FXRP] transfer:", { from, to, amountRaw, amount: amount.toString(), token: FXRP_TOKEN });
 
-  const tx = await token.transfer(to, amount);
+
   console.log("[FXRP] tx sent:", tx.hash);
 
   // Можно ждать 1 подтверждение, но это замедляет UX. Если хочешь:
