@@ -10,7 +10,17 @@ class FxrpChain:
         # 1. Connect to Coston2
         rpc_url = os.getenv("FLARE_RPC_URL", "https://coston2-api.flare.network/ext/C/rpc")
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
-        
+        # Cache chain id to avoid RPC spam
+        env_chain_id = os.getenv("FLARE_CHAIN_ID")
+        if env_chain_id:
+            self._chain_id = int(env_chain_id)
+        else:
+            try:
+                self._chain_id = int(self.w3.eth.chain_id)
+            except Exception:
+                # fallback safe value (won't break signature format)
+                self._chain_id = 0
+
         # 2. Load the Contract Address
         self.contract_address = os.getenv("FXRP_CONTRACT")
         if not self.contract_address:
@@ -46,6 +56,11 @@ class FxrpChain:
         except Exception as e:
             print(f"Error reading balance: {e}")
             return 0.0
+
+    def get_chain_id(self) -> int:
+        """Return cached chain id (no RPC calls)."""
+        return self._chain_id
+
 
 # Create a single instance to be used by other files
 fxrp_client = FxrpChain()

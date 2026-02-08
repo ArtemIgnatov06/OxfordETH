@@ -70,8 +70,8 @@ def _sigproof_from_body(pb: ProofBody) -> SigProof:
 
 
 def _current_chain_id() -> int:
-    # Single source of truth for chain_id
-    return int(fxrp_client.w3.eth.chain_id)
+    return fxrp_client.get_chain_id()
+
 
 
 # ---------- ENDPOINTS ----------

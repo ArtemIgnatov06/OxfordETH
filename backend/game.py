@@ -252,7 +252,7 @@ class GameState:
 
         expected = build_action_message(
             game_id=os.getenv("GAME_ID", "local"),
-            chain_id=fxrp_client.w3.eth.chain_id,
+            chain_id=fxrp_client.get_chain_id(),
             player_index=p,
             action=action,
             params=params,
