@@ -109,7 +109,7 @@ class GameState:
         self.ownership = {}
         self.buy_prompt = None
 
-        self.balances = [4200, 1337, 777][: self.players_count]
+        self.balances = [1000, 1000, 1000][: self.players_count]
         self.trade_offers = []
         self.messages = [Message("System", "Welcome to FlarePoly Testnet!", "system")]
 
