@@ -69,7 +69,7 @@ class TradeOffer:
 
 @dataclass
 class GameState:
-    players_count: int = 4
+    players_count: int = 3
 
     dice: List[int] = field(default_factory=lambda: [1, 1])
     player_pos: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
