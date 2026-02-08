@@ -16,7 +16,6 @@ from player import Player
 from auth_sig import SigProof, build_action_message, verify_proof
 from chain.chain_fxrp import fxrp_client  # <-- use your real on-chain client :contentReference[oaicite:3]{index=3}
 
-from web3 import Web3
 
 
 OfferType = Literal["sell", "buy"]
