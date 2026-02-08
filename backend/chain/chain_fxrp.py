@@ -1,5 +1,7 @@
 import os
 import json
+import time
+
 from web3 import Web3
 from dotenv import load_dotenv
 
@@ -47,12 +49,26 @@ class FxrpChain:
         )
 
     def get_balance(self, address: str) -> float:
-        """Reads on-chain balance"""
-        if not self.w3.is_connected(): 
+        if not address:
             return 0.0
+
+        key = address.lower()
+        now = time.time()
+        ttl = float(os.getenv("BALANCE_CACHE_TTL", "10"))
+
+        if key in self._bal_cache:
+            ts, val = self._bal_cache[key]
+            if now - ts < ttl:
+                return val
+
+        if not self.w3.is_connected():
+            return 0.0
+
         try:
             raw = self.contract.functions.balanceOf(Web3.to_checksum_address(address)).call()
-            return float(self.w3.from_wei(raw, 'ether'))
+            val = float(self.w3.from_wei(raw, 'ether'))
+            self._bal_cache[key] = (now, val)
+            return val
         except Exception as e:
             print(f"Error reading balance: {e}")
             return 0.0
