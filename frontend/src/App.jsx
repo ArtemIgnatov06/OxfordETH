@@ -85,28 +85,29 @@ function App() {
 
   return (
     <div className="app-container">
-      <div className="wallet-overlay">
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {!playerWallets[i] ? (
-                <button className="connect-btn" onClick={() => connectAsPlayer(i)}>
-                  CONNECT P{i + 1}
-                </button>
-              ) : (
-                <div className="wallet-connected">
-                  <span className="status-dot">🟢</span>
-                  P{i + 1}: {playerWallets[i].slice(0, 6)}...{playerWallets[i].slice(-4)}
-                </div>
-              )}
+    <div className="wallet-overlay">
+    <div className="connect-stack">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="connect-row">
+          {!playerWallets[i] ? (
+            <button className="connect-btn" onClick={() => connectAsPlayer(i)}>
+              CONNECT P{i + 1}
+            </button>
+          ) : (
+            <div className="wallet-connected">
+              <span className="status-dot">🟢</span>
+              P{i + 1}: {playerWallets[i].slice(0, 6)}...{playerWallets[i].slice(-4)}
             </div>
-          ))}
+          )}
         </div>
+      ))}
+    </div>
 
-        <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
-          Tip: In MetaMask, switch account before connecting the next player.
-        </div>
-      </div>
+    <div className="connect-tip">
+      Tip: In MetaMask, switch account before connecting the next player.
+    </div>
+  </div>
+
 
       <Board playerWallets={playerWallets} />
     </div>

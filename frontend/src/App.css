@@ -32,10 +32,12 @@
 
 /* --- СТИЛИ КОШЕЛЬКА (Остаются прежними) --- */
 .wallet-overlay {
-  position: absolute;
-  top: 30px;   /* Чуть отодвинул от верха */
-  right: 30px; /* Чуть отодвинул от края */
-  z-index: 100; /* Поверх всего */
+  position: fixed;
+  right: 18px;
+  top: calc(50% - 320px); /* было 260px — стало выше */
+  transform: translateY(-50%);
+  width: 240px;
+  z-index: 1000;
 }
 
 .connect-btn {
@@ -83,4 +85,38 @@
   0% { opacity: 1; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
   70% { opacity: 1; box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
   100% { opacity: 1; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+
+.connect-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.connect-row {
+  display: flex;
+}
+
+.connect-btn,
+.wallet-connected {
+  width: 100%;           /* ✅ одинаковая ширина */
+  box-sizing: border-box;
+  border-radius: 12px;   /* ✅ красиво и ровно */
+}
+
+.connect-btn {
+  padding: 10px 12px;    /* ✅ под размер панели */
+  text-align: center;
+}
+
+.wallet-connected {
+  padding: 10px 12px;    /* ✅ тот же размер что кнопка */
+  justify-content: center; /* ✅ визуально по центру */
+}
+
+.connect-tip {
+  margin-top: 10px;
+  font-size: 12px;
+  opacity: 0.8;
 }
