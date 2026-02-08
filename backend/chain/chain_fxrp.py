@@ -78,6 +78,34 @@ class FxrpChain:
         """Return cached chain id (no RPC calls)."""
         return self._chain_id
 
+    def transfer_from_bank(self, to_addr: str, amount_raw: int) -> str:
+        pk = os.getenv("BANK_PRIVATE_KEY")
+        bank = os.getenv("BANK_WALLET")
+
+        if not pk or not bank:
+            raise ValueError("BANK_PRIVATE_KEY / BANK_WALLET not configured")
+
+        bank = Web3.to_checksum_address(bank)
+        to = Web3.to_checksum_address(to_addr)
+
+        nonce = self.w3.eth.get_transaction_count(bank)
+
+        tx = self.contract.functions.transfer(
+            to,
+            int(amount_raw)
+        ).build_transaction({
+            "from": bank,
+            "nonce": nonce,
+            "chainId": self.get_chain_id(),
+            "gas": 150_000,
+            "gasPrice": self.w3.eth.gas_price,
+        })
+
+        signed = self.w3.eth.account.sign_transaction(tx, private_key=pk)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+
+        return tx_hash.hex()
+
 
 # Create a single instance to be used by other files
 fxrp_client = FxrpChain()
