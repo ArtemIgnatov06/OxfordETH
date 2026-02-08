@@ -123,6 +123,107 @@ class GameState:
         self.pending_settlement = None
 
     # ---------------- helpers ----------------
+
+    def create_trade_simple(
+            self,
+            offer_type: OfferType,
+            to_player: int,
+            tile_id: int,
+            price_fc: int,
+    ):
+        self._guard_turn_not_blocked()
+
+        if to_player == self.active_player:
+            raise ValueError("Cannot trade with yourself")
+
+        if tile_id not in BUYABLE_PROPERTY_IDS:
+            raise ValueError("Tile not tradable")
+
+        if price_fc <= 0:
+            raise ValueError("Price must be positive")
+
+        owner = self.ownership.get(tile_id)
+
+        if offer_type == "sell":
+            if owner != self.active_player:
+                raise ValueError("You do not own this property")
+        else:  # buy
+            if owner != to_player:
+                raise ValueError("Target player does not own this property")
+
+        offer = TradeOffer(
+            id=str(uuid.uuid4()),
+            type=offer_type,
+            from_player=self.active_player,
+            to_player=to_player,
+            tile_id=tile_id,
+            price_fc=price_fc,
+            created_at=int(time.time() * 1000),
+        )
+
+        self.trade_offers.insert(0, offer)
+
+        tile = TILES_BY_ID[tile_id]
+        verb = "SELL" if offer_type == "sell" else "BUY"
+        self.add_message(
+            "System",
+            f"P{offer.from_player + 1} offers to {verb} {tile.name} "
+            f"to/from P{offer.to_player + 1} for {price_fc} FC",
+            "system",
+        )
+
+    def accept_trade_simple(self, offer_id: str):
+        offer = self._find_offer(offer_id)
+
+        if self.active_player != offer.to_player:
+            raise ValueError("You can accept offers only on your turn")
+
+        tile_id = offer.tile_id
+        tile = TILES_BY_ID[tile_id]
+
+        seller = offer.from_player if offer.type == "sell" else offer.to_player
+        buyer = offer.to_player if offer.type == "sell" else offer.from_player
+
+        if self.ownership.get(tile_id) != seller:
+            self._remove_offer(offer_id)
+            raise ValueError("Ownership changed, trade cancelled")
+
+        if self.balances[buyer] < offer.price_fc:
+            raise ValueError("Buyer has insufficient balance")
+
+        # ---- FC transfer ----
+        self.balances[buyer] -= offer.price_fc
+        self.balances[seller] += offer.price_fc
+
+        # ---- ownership ----
+        self.ownership[tile_id] = buyer
+
+        self.add_message(
+            "System",
+            f"Trade complete: {tile.name} P{seller + 1} → P{buyer + 1} "
+            f"for {offer.price_fc} FC",
+            "system",
+        )
+
+        self._remove_offer(offer_id)
+        self._check_bankruptcy_and_win()
+        self.next_player()
+
+    def decline_trade_simple(self, offer_id: str):
+        offer = self._find_offer(offer_id)
+
+        if self.active_player != offer.to_player:
+            raise ValueError("You can decline offers only on your turn")
+
+        self.add_message(
+            "System",
+            f"P{offer.to_player + 1} declined trade offer",
+            "system",
+        )
+
+        self._remove_offer(offer_id)
+        self.next_player()
+
     def chat(self, text: str, proof: Optional[SigProof] = None):
         text = (text or "").strip()
         if not text:
