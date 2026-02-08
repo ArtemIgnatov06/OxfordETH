@@ -15,6 +15,7 @@ from chain.chain_fxrp import fxrp_client  # <-- use your real on-chain client :c
 
 from web3 import Web3
 from web3._utils.events import get_event_data
+from hexbytes import HexBytes
 
 
 OfferType = Literal["sell", "buy"]
@@ -299,7 +300,20 @@ class GameState:
         fxrp_addr = Web3.to_checksum_address(contract.address)
 
         # Transfer topic0
-        transfer_topic = w3.keccak(text="Transfer(address,address,uint256)").hex()
+        transfer_topic = Web3.keccak(text="Transfer(address,address,uint256)")  # bytes32
+
+        for log in receipt["logs"]:
+            if Web3.to_checksum_address(log["address"]) != fxrp_addr:
+                continue
+
+            topics = log.get("topics", [])
+            if not topics:
+                continue
+
+            if HexBytes(topics[0]) != HexBytes(transfer_topic):
+                continue
+
+            decoded = get_event_data(w3.codec, event_abi, log)
 
         ef = Web3.to_checksum_address(expected_from)
         et = Web3.to_checksum_address(expected_to)
