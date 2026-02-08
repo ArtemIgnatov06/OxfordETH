@@ -301,6 +301,7 @@ class GameState:
 
         # Transfer topic0
         transfer_topic = Web3.keccak(text="Transfer(address,address,uint256)")  # bytes32
+        event_abi = contract.events.Transfer._get_event_abi()
 
         for log in receipt["logs"]:
             if Web3.to_checksum_address(log["address"]) != fxrp_addr:
@@ -320,7 +321,7 @@ class GameState:
         ev_amt = int(expected_amount_raw)
 
         # Decode only relevant logs -> no MismatchedABI spam
-        event_abi = contract.events.Transfer._get_event_abi()
+
 
         for log in receipt["logs"]:
             if Web3.to_checksum_address(log["address"]) != fxrp_addr:
