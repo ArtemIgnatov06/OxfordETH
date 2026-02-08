@@ -3,7 +3,8 @@ import { useState } from "react";
 import Board from "./components/Board/Board";
 import "./App.css";
 
-const API = "http://localhost:8000";
+const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
 
 async function getActionMessage(playerIndex, action, params = "") {
   const res = await fetch(
