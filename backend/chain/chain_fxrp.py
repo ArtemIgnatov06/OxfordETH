@@ -47,6 +47,7 @@ class FxrpChain:
             address=Web3.to_checksum_address(self.contract_address),
             abi=self.abi
         )
+        self._bal_cache = {}
 
     def get_balance(self, address: str) -> float:
         if not address:
