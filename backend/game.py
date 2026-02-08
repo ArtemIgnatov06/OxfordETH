@@ -1,3 +1,6 @@
+from transactions import PendingSettlement, TxVerifier
+from web3 import Web3
+
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Literal
 import time
@@ -14,8 +17,6 @@ from auth_sig import SigProof, build_action_message, verify_proof
 from chain.chain_fxrp import fxrp_client  # <-- use your real on-chain client :contentReference[oaicite:3]{index=3}
 
 from web3 import Web3
-from web3._utils.events import get_event_data
-from hexbytes import HexBytes
 
 
 OfferType = Literal["sell", "buy"]
@@ -98,8 +99,8 @@ class GameState:
     nonces: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
 
     # Pending settlement: we require an on-chain FXRP transfer before finalizing buy/trade
-    pending_settlement: Optional[Dict] = None
-    # {"kind":"buy"|"trade","from":addr,"to":addr,"amountRaw":int,"tileId":int,"offerId":str|None}
+    pending_settlement: Optional[PendingSettlement] = None
+    tx_verifier: TxVerifier = field(default_factory=TxVerifier)
 
     def reset(self):
         self.dice = [1, 1]
@@ -280,54 +281,6 @@ class GameState:
 
     # ---------------- settlement verification (on-chain) ----------------
 
-    def _verify_fxrp_transfer(self, *, tx_hash: str, expected_from: str, expected_to: str,
-                              expected_amount_raw: int) -> None:
-        w3 = fxrp_client.w3
-        receipt = w3.eth.get_transaction_receipt(tx_hash)
-        if receipt is None:
-            raise ValueError("tx not found / not mined")
-        if receipt.get("status") != 1:
-            raise ValueError("tx failed")
-
-        # confirmations
-        min_conf = int(os.getenv("MIN_CONFIRMATIONS", "1"))
-        latest = w3.eth.block_number
-        conf = latest - receipt["blockNumber"] + 1
-        if conf < min_conf:
-            raise ValueError(f"not enough confirmations ({conf}/{min_conf})")
-
-        contract = fxrp_client.contract
-        fxrp_addr = Web3.to_checksum_address(contract.address)
-
-        # Transfer topic0
-        transfer_topic = Web3.keccak(text="Transfer(address,address,uint256)")  # bytes32
-        event_abi = contract.events.Transfer._get_event_abi()
-
-
-        ef = Web3.to_checksum_address(expected_from)
-        et = Web3.to_checksum_address(expected_to)
-        ev_amt = int(expected_amount_raw)
-
-        # Decode only relevant logs -> no MismatchedABI spam
-
-
-        for log in receipt["logs"]:
-            if Web3.to_checksum_address(log["address"]) != fxrp_addr:
-                continue
-            if not log["topics"] or log["topics"][0].hex() != transfer_topic:
-                continue
-
-            decoded = get_event_data(w3.codec, event_abi, log)
-            args = decoded["args"]
-
-            if (Web3.to_checksum_address(args["from"]) == ef and
-                    Web3.to_checksum_address(args["to"]) == et and
-                    int(args["value"]) == ev_amt):
-                return
-
-        raise ValueError("no matching FXRP Transfer found in tx")
-
-    # ---------------- actions ----------------
 
     def roll(self, proof: Optional[SigProof] = None):
         self._advance_to_next_alive()
@@ -411,14 +364,13 @@ class GameState:
         if not to_addr:
             raise ValueError("TREASURY_WALLET not configured")
 
-        self.pending_settlement = {
-            "kind": "buy",
-            "from": buyer_addr,
-            "to": to_addr,
-            "amountRaw": cost_raw,
-            "tileId": prompt_tile,
-            "offerId": None,
-        }
+        self.pending_settlement = PendingSettlement(
+            kind="buy",
+            from_addr=buyer_addr,
+            to_addr=to_addr,
+            amount_raw=cost_raw,
+            tile_id=prompt_tile,
+        )
 
         self.add_message("System", f"Payment required: send FXRP(raw={cost_raw}) then submit tx hash via /settle", "system")
 
@@ -509,14 +461,15 @@ class GameState:
             raise ValueError("Both players must have connected wallets")
 
         amount_raw = self._fc_to_fxrp_raw(offer.price_fc)
-        self.pending_settlement = {
-            "kind": "trade",
-            "from": buyer_addr,
-            "to": seller_addr,
-            "amountRaw": amount_raw,
-            "tileId": offer.tile_id,
-            "offerId": offer_id,
-        }
+        self.pending_settlement = PendingSettlement(
+            kind="trade",
+            from_addr=buyer_addr,
+            to_addr=seller_addr,
+            amount_raw=amount_raw,
+            tile_id=offer.tile_id,
+            offer_id=offer_id,
+        )
+
         self.add_message("System", f"Trade settlement required: send FXRP(raw={amount_raw}) then submit tx hash via /settle", "system")
 
     def decline_offer(self, proof: Optional[SigProof], offer_id: str):
@@ -537,11 +490,12 @@ class GameState:
         self._require_sig("SETTLE", f"tx={tx_hash}", proof)
 
         ps = self.pending_settlement
-        self._verify_fxrp_transfer(
+
+        self.tx_verifier.verify_fxrp_transfer(
             tx_hash=tx_hash,
-            expected_from=ps["from"],
-            expected_to=ps["to"],
-            expected_amount_raw=int(ps["amountRaw"]),
+            expected_from=ps.from_addr,
+            expected_to=ps.to_addr,
+            expected_amount_raw=int(ps.amount_raw),
         )
 
         tile = TILES_BY_ID[ps["tileId"]]
@@ -601,7 +555,8 @@ class GameState:
             # Real on-chain balance for UI
             "balancesFXRP": balances_fxrp,
             "playerWallets": self.player_wallets,
-            "pendingSettlement": self.pending_settlement,
+            "pendingSettlement": self.pending_settlement.to_front() if self.pending_settlement else None,
+
 
             "tradeOffers": [o.to_front() for o in self.trade_offers],
             "messages": [{"user": m.user, "text": m.text, "type": m.type, "delta": m.delta} for m in self.messages],
