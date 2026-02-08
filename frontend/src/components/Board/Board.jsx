@@ -140,6 +140,7 @@
   };
 
   const PLAYER_COLORS = ['#22c55e', '#3b82f6', '#a855f7', '#f97316'];
+  const MAX_PLAYERS_UI = 3;
 
   const Board = () => {
     // === LOCAL UI STATE ===
@@ -215,7 +216,7 @@
     }, [isRolling, isPaying]);
 
     // === DERIVED DATA ===
-    const playersCount = gameState ? gameState.playerPos.length : 4;
+    const playersCount = gameState ? Math.min(gameState.playerPos.length, MAX_PLAYERS_UI) : MAX_PLAYERS_UI;
     const activePlayer = gameState ? gameState.activePlayer : 0;
     const balances = gameState ? gameState.balances : [0, 0, 0, 0];
     const ownership = gameState ? gameState.ownership : {};
@@ -841,7 +842,7 @@
         <aside className="wallets-panel">
           <div className="wallets-title">PLAYERS</div>
 
-          {gameState.balances.map((bal, idx) => {
+          {gameState.balances.slice(0, MAX_PLAYERS_UI).map((bal, idx) => {
             const isActive = idx === activePlayer;
             const isOut = !!eliminated?.[idx];
             const prisonSkips = skipTurns?.[idx] || 0;
@@ -872,7 +873,8 @@
                 </div>
 
                 <div className="wallet-right">
-                  <div className="wallet-chip">POS {visualPlayerPos[idx]}</div>
+                  <div className="wallet-chip">POS {(visualPlayerPos?.[idx] ?? 0)}</div>
+
 
                   {inPrison && (
                     <div className="wallet-chip" style={{ fontWeight: 900 }}>
