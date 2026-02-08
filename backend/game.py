@@ -303,18 +303,6 @@ class GameState:
         transfer_topic = Web3.keccak(text="Transfer(address,address,uint256)")  # bytes32
         event_abi = contract.events.Transfer._get_event_abi()
 
-        for log in receipt["logs"]:
-            if Web3.to_checksum_address(log["address"]) != fxrp_addr:
-                continue
-
-            topics = log.get("topics", [])
-            if not topics:
-                continue
-
-            if HexBytes(topics[0]) != HexBytes(transfer_topic):
-                continue
-
-            decoded = get_event_data(w3.codec, event_abi, log)
 
         ef = Web3.to_checksum_address(expected_from)
         et = Web3.to_checksum_address(expected_to)
@@ -419,7 +407,10 @@ class GameState:
 
         cost_raw = self._usd_to_fxrp_raw(float(tile.price))
 
-        to_addr = os.getenv("TREASURY_WALLET", buyer_addr or "0x0000000000000000000000000000000000000000")
+        to_addr = os.getenv("TREASURY_WALLET")
+        if not to_addr:
+            raise ValueError("TREASURY_WALLET not configured")
+
         self.pending_settlement = {
             "kind": "buy",
             "from": buyer_addr,
