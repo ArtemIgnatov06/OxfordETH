@@ -14,6 +14,7 @@ from auth_sig import SigProof, build_action_message, verify_proof
 from chain.chain_fxrp import fxrp_client  # <-- use your real on-chain client :contentReference[oaicite:3]{index=3}
 
 from web3 import Web3
+from web3._utils.events import get_event_data
 
 
 OfferType = Literal["sell", "buy"]
@@ -278,10 +279,8 @@ class GameState:
 
     # ---------------- settlement verification (on-chain) ----------------
 
-    def _verify_fxrp_transfer(self, *, tx_hash: str, expected_from: str, expected_to: str, expected_amount_raw: int) -> None:
-        """
-        Uses fxrp_client.contract logs to verify ERC-20 Transfer(from,to,value).
-        """
+    def _verify_fxrp_transfer(self, *, tx_hash: str, expected_from: str, expected_to: str,
+                              expected_amount_raw: int) -> None:
         w3 = fxrp_client.w3
         receipt = w3.eth.get_transaction_receipt(tx_hash)
         if receipt is None:
@@ -296,18 +295,31 @@ class GameState:
         if conf < min_conf:
             raise ValueError(f"not enough confirmations ({conf}/{min_conf})")
 
-        c = fxrp_client.contract
+        contract = fxrp_client.contract
+        fxrp_addr = Web3.to_checksum_address(contract.address)
 
-        # Requires Transfer event in ABI (your GameFXRP.json should have it).
-        logs = c.events.Transfer().process_receipt(receipt)
+        # Transfer topic0
+        transfer_topic = w3.keccak(text="Transfer(address,address,uint256)").hex()
 
-        ef = _to_checksum(expected_from)
-        et = _to_checksum(expected_to)
+        ef = Web3.to_checksum_address(expected_from)
+        et = Web3.to_checksum_address(expected_to)
         ev_amt = int(expected_amount_raw)
 
-        for ev in logs:
-            args = ev["args"]
-            if _to_checksum(args["from"]) == ef and _to_checksum(args["to"]) == et and int(args["value"]) == ev_amt:
+        # Decode only relevant logs -> no MismatchedABI spam
+        event_abi = contract.events.Transfer._get_event_abi()
+
+        for log in receipt["logs"]:
+            if Web3.to_checksum_address(log["address"]) != fxrp_addr:
+                continue
+            if not log["topics"] or log["topics"][0].hex() != transfer_topic:
+                continue
+
+            decoded = get_event_data(w3.codec, event_abi, log)
+            args = decoded["args"]
+
+            if (Web3.to_checksum_address(args["from"]) == ef and
+                    Web3.to_checksum_address(args["to"]) == et and
+                    int(args["value"]) == ev_amt):
                 return
 
         raise ValueError("no matching FXRP Transfer found in tx")
