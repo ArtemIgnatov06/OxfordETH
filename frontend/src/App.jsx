@@ -49,7 +49,8 @@ async function linkPlayerWallet(playerIndex, address) {
 
 function App() {
   // store wallet per player slot
-  const [playerWallets, setPlayerWallets] = useState([null, null, null, null]);
+  const [playerWallets, setPlayerWallets] = useState([null, null, null]);
+
 
   const connectAsPlayer = async (playerIndex) => {
     if (!window.ethereum) {
