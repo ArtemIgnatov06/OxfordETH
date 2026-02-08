@@ -87,7 +87,7 @@ function App() {
     <div className="app-container">
       <div className="wallet-overlay">
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {[0, 1, 2, 3].map((i) => (
+          {[0, 1, 2].map((i) => (
             <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
               {!playerWallets[i] ? (
                 <button className="connect-btn" onClick={() => connectAsPlayer(i)}>

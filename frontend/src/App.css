@@ -32,12 +32,25 @@
 
 /* --- СТИЛИ КОШЕЛЬКА (Остаются прежними) --- */
 .wallet-overlay {
-  position: absolute;
-  top: 30px;   /* Чуть отодвинул от верха */
-  right: 30px; /* Чуть отодвинул от края */
-  z-index: 100; /* Поверх всего */
+  position: fixed;
+  right: 35px;           /* ✅ как у wallets-panel */
+  top: calc(50% - 420px);/* ✅ подгон: overlay над панелью */
+  width: 240px;          /* ✅ как у wallets-panel */
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.wallet-overlay .connect-btn {
+  width: 100%;
+}
+.wallet-overlay > div > div {
+  width: 100%;
 }
 
+.wallet-overlay > div > div .wallet-connected {
+  width: 100%;
+}
 .connect-btn {
   background: linear-gradient(90deg, #ff0055, #ff9900); /* Flare Colors */
   border: none;

@@ -74,20 +74,20 @@ class GameState:
     players_count: int = 3
 
     dice: List[int] = field(default_factory=lambda: [1, 1])
-    player_pos: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
+    player_pos: List[int] = field(default_factory=lambda: [0, 0, 0])
     active_player: int = 0
 
     eliminated: List[bool] = field(default_factory=lambda: [False, False, False, False])
     game_over: bool = False
     winner: Optional[int] = None
     chance_deck: ChanceDeck = field(default_factory=ChanceDeck)
-    skip_turns: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
+    skip_turns: List[int] = field(default_factory=lambda: [0, 0, 0])
 
     ownership: Dict[int, int] = field(default_factory=dict)
     buy_prompt: Optional[Dict] = None
 
     # In-game FC (for bankruptcy/winner logic)
-    balances: List[int] = field(default_factory=lambda: [4200, 1337, 777, 9001])
+    balances: List[int] = field(default_factory=lambda: [1000, 1000, 1000])
 
     trade_offers: List[TradeOffer] = field(default_factory=list)
 
@@ -109,7 +109,7 @@ class GameState:
         self.ownership = {}
         self.buy_prompt = None
 
-        self.balances = [4200, 1337, 777, 9001][: self.players_count]
+        self.balances = [4200, 1337, 777][: self.players_count]
         self.trade_offers = []
         self.messages = [Message("System", "Welcome to FlarePoly Testnet!", "system")]
 

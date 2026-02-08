@@ -188,7 +188,7 @@ const Board = () => {
   }, [isRolling]);
 
   // === DERIVED DATA ===
-  const playersCount = gameState ? gameState.playerPos.length : 4;
+  const playersCount = gameState ? gameState.playerPos.length : 3;
   const activePlayer = gameState ? gameState.activePlayer : 0;
   const balances = gameState ? gameState.balances : [0, 0, 0, 0];
   const ownership = gameState ? gameState.ownership : {};
