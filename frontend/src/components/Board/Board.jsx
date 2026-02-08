@@ -3,8 +3,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import './Board.css';
 import { TILES, FAMILY_COLORS } from './BoardData';
 import ChanceModal from "../Chance/ChanceModal";
+import { ethers } from 'ethers';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const FXRP_TOKEN = import.meta.env.VITE_FXRP_TOKEN; // 0x...
 
 // --- Metamask signing helpers ---
 const hasEthereum = () => typeof window !== 'undefined' && !!window.ethereum;
@@ -24,7 +26,7 @@ const getActionMessage = async (playerIndex, action, params = "") => {
     const txt = await res.text();
     throw new Error(`Failed to fetch action message: ${txt}`);
   }
-  return res.json(); // { message }
+  return res.json(); // { message, nonce }
 };
 
 // Build SigProof for ACTIVE player turn (backend requires active player to sign)
@@ -50,6 +52,35 @@ const buildProofForActiveTurn = async (action, params = "") => {
   return { address: addr, message, signature };
 };
 
+// ---- ERC20 transfer helper ----
+const ERC20_ABI = [
+  "function transfer(address to, uint256 amount) returns (bool)"
+];
+
+const sendFxrpTransfer = async ({ from, to, amountRaw }) => {
+  if (!window.ethereum) throw new Error("MetaMask not found");
+  if (!FXRP_TOKEN) throw new Error("VITE_FXRP_TOKEN is not set");
+
+  // IMPORTANT: amountRaw MUST be BigInt/string (NOT number) to avoid overflow
+  const amount = BigInt(String(amountRaw));
+
+  const provider = new ethers.BrowserProvider(window.ethereum);
+
+  // signer must match "from" wallet
+  const signer = await provider.getSigner(from);
+  const token = new ethers.Contract(FXRP_TOKEN, ERC20_ABI, signer);
+
+  console.log("[FXRP] transfer:", { from, to, amountRaw, amount: amount.toString(), token: FXRP_TOKEN });
+
+  const tx = await token.transfer(to, amount);
+  console.log("[FXRP] tx sent:", tx.hash);
+
+  // Можно ждать 1 подтверждение, но это замедляет UX. Если хочешь:
+  // await tx.wait(1);
+
+  return tx.hash;
+};
+
 // API helper that supports signed actions
 const apiCall = async (endpoint, method = 'GET', body = null) => {
   try {
@@ -62,7 +93,6 @@ const apiCall = async (endpoint, method = 'GET', body = null) => {
     const res = await fetch(`${API_URL}${endpoint}`, options);
 
     if (!res.ok) {
-      // backend sometimes returns json, sometimes plain text
       let errText = '';
       try {
         const errJson = await res.json();
@@ -73,7 +103,6 @@ const apiCall = async (endpoint, method = 'GET', body = null) => {
       throw new Error(errText || 'API Error');
     }
 
-    // Some endpoints may return empty; but ours return json state
     try {
       return await res.json();
     } catch {
@@ -129,13 +158,13 @@ const Board = () => {
   };
 
   // ===== CHANCE CARD UI =====
-  const [chanceCard, setChanceCard] = useState(null); // { text, delta, key }
+  const [chanceCard, setChanceCard] = useState(null);
   const lastMsgCountRef = useRef(0);
   const closeChance = () => setChanceCard(null);
 
   // ===== GAME OVER / BANKRUPT UI =====
   const [winnerModalOpen, setWinnerModalOpen] = useState(false);
-  const [bankruptModal, setBankruptModal] = useState(null); // { playerIndex }
+  const [bankruptModal, setBankruptModal] = useState(null);
   const lastEliminatedRef = useRef([false, false, false, false]);
 
   // === DATA FETCHING ===
@@ -151,7 +180,6 @@ const Board = () => {
     }
   };
 
-  // Polling
   useEffect(() => {
     fetchState();
     const interval = setInterval(fetchState, 1000);
@@ -169,7 +197,6 @@ const Board = () => {
   const tradeOffers = gameState ? gameState.tradeOffers : [];
   const dice = gameState ? gameState.dice : [1, 1];
 
-  // NEW from backend:
   const eliminated = gameState ? gameState.eliminated : [false, false, false, false];
   const gameOver = gameState ? gameState.gameOver : false;
   const winner = gameState ? gameState.winner : null;
@@ -187,7 +214,6 @@ const Board = () => {
     const prevCount = lastMsgCountRef.current;
     const nextCount = messages.length;
 
-    // При первом подключении синхронизируемся, чтобы не открыть модалки на "Welcome..."
     if (prevCount === 0 && nextCount > 0) {
       lastMsgCountRef.current = nextCount;
       return;
@@ -209,11 +235,10 @@ const Board = () => {
     lastMsgCountRef.current = nextCount;
   }, [messages, gameState]);
 
-  // ===== BANKRUPT / GAME OVER реакция (из backend eliminated/gameOver/winner) =====
+  // ===== BANKRUPT / GAME OVER реакция =====
   useEffect(() => {
     if (!gameState) return;
 
-    // 1) банкрот конкретного игрока
     const prev = lastEliminatedRef.current || [];
     const now = eliminated || [];
     for (let i = 0; i < now.length; i++) {
@@ -224,7 +249,6 @@ const Board = () => {
     }
     lastEliminatedRef.current = [...now];
 
-    // 2) окончание игры
     if (gameOver) {
       setWinnerModalOpen(true);
       setTradeOpen(false);
@@ -360,6 +384,10 @@ const Board = () => {
     setIsRolling(false);
   };
 
+  // FULL BUY FLOW:
+  // 1) /buy -> pendingSettlement
+  // 2) metamask ERC20 transfer using pendingSettlement data
+  // 3) /settle with txHash
   const handleBuy = async () => {
     if (!buyPrompt || gameOver || activeEliminated) return;
     if (pendingSettlement) {
@@ -367,8 +395,33 @@ const Board = () => {
       return;
     }
 
-    // backend expects BUY signed params: tileId=<id>
-    await signedAction('BUY', `tileId=${buyPrompt.tileId}`, '/buy', { tileId: buyPrompt.tileId });
+    // Stage 1: create pendingSettlement in backend
+    const st1 = await signedAction('BUY', `tileId=${buyPrompt.tileId}`, '/buy', { tileId: buyPrompt.tileId });
+    if (!st1) return;
+
+    const ps = st1.pendingSettlement;
+    if (!ps) {
+      alert("No pendingSettlement returned by backend");
+      return;
+    }
+
+    // Stage 2: send FXRP ERC20 transfer
+    try {
+      const txHash = await sendFxrpTransfer({
+        from: ps.from,
+        to: ps.to,
+        amountRaw: ps.amountRaw,
+      });
+
+      // Stage 3: settle in backend
+      const st2 = await signedAction('SETTLE', `tx=${txHash}`, '/settle', { txHash });
+      if (!st2) {
+        alert("Settle failed. Try again with the same tx hash.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert(e.message || "Transfer failed");
+    }
   };
 
   const handleSkipBuy = async () => {
@@ -379,8 +432,6 @@ const Board = () => {
   };
 
   const handleReset = async () => {
-    // reset is usually admin/debug — in many backends it is unsigned.
-    // If your backend requires signature for RESET, change to signedAction('RESET','', '/reset')
     const newState = await apiCall('/reset', 'POST');
     if (newState) {
       setGameState(newState);
@@ -463,8 +514,6 @@ const Board = () => {
     if (tileId == null) return;
 
     const offerType = tradeForm.mode; // "sell" | "buy"
-
-    // backend expects: type=<>&to=<>&tileId=<>&priceFC=<>
     const params = `type=${offerType}&to=${target}&tileId=${tileId}&priceFC=${priceFC}`;
 
     await signedAction('CREATE_OFFER', params, '/offers', {
@@ -504,12 +553,8 @@ const Board = () => {
     const textToSend = chatMsg;
     setChatMsg('');
 
-    // Chat should be signed by ACTIVE player too
     const newState = await signedAction('CHAT', `text=${encodeURIComponent(textToSend)}`, '/chat', { text: textToSend });
-    if (!newState) {
-      // if failed, restore input so user doesn't lose text
-      setChatMsg(textToSend);
-    }
+    if (!newState) setChatMsg(textToSend);
   };
 
   // --- Chat Auto Scroll ---
@@ -582,7 +627,6 @@ const Board = () => {
                                   : `P${activePlayer + 1} ROLL`}
                 </button>
 
-                {/* tiny helper: show which wallet is bound to active player */}
                 <div style={{ marginTop: 6, fontSize: 11, opacity: 0.75 }}>
                   Active wallet:{' '}
                   {playerWallets?.[activePlayer]
@@ -852,7 +896,7 @@ const Board = () => {
                 </div>
                 {pendingSettlement && (
                   <div style={{ marginTop: 10, fontSize: 12, opacity: 0.85 }}>
-                    Payment required. After FXRP transfer, call <b>/settle</b> with tx hash.
+                    Payment required. After FXRP transfer, backend will call <b>/settle</b>.
                   </div>
                 )}
               </div>
