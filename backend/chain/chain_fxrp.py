@@ -80,7 +80,7 @@ class FxrpChain:
 
     def transfer_from_bank(self, to_addr: str, amount_raw: int) -> str:
         pk = os.getenv("BANK_PRIVATE_KEY")
-        bank = os.getenv("BANK_WALLET")
+        bank = os.getenv("TREASURY_WALLET")
 
         if not pk or not bank:
             raise ValueError("BANK_PRIVATE_KEY / BANK_WALLET not configured")
